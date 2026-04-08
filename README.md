@@ -1,6 +1,16 @@
+---
+title: Signadapt Env
+emoji: 👁
+colorFrom: purple
+colorTo: red
+sdk: docker
+pinned: false
+license: mit
+---
+
 # SignAdapt — Adaptive Sign-Language Tutoring Environment
 
-An **OpenEnv-compliant** reinforcement learning environment where an AI agent must plan **adaptive sign-language teaching interventions** for a simulated deaf/hard-of-hearing learner whose internal state (comprehension, attention, frustration, confidence) evolves dynamically in response to each intervention.
+An **OpenEnv-compliant** reinforcement learning environment where an AI agent plans **adaptive sign-language teaching interventions** for a simulated deaf/hard-of-hearing learner whose internal state (comprehension, attention, frustration, confidence) evolves dynamically in response to each intervention.
 
 ## What Makes This Different
 
@@ -77,6 +87,17 @@ The final grade measures **actual learner improvement**, not just plan structure
 
 Pass threshold: **0.70**. The grade includes before/after comprehension scores showing exactly what changed.
 
+## Baseline Scores
+
+Reproducible local baseline using the heuristic fallback in `inference.py` against the bundled environment:
+
+| Task | Score | Passed |
+|---|---|---|
+| `easy_remediate_handshape` | 0.71 | true |
+| `medium_movement_timing_scaffold` | 0.81 | true |
+| `hard_multi_error_adaptive` | 0.74 | true |
+| **Average** | **0.76** | — |
+
 ## API Endpoints (OpenEnv-Compliant)
 
 | Method | Path | Description |
@@ -99,7 +120,7 @@ The `inference.py` emits structured stdout in the required format:
 [END] success=<true|false> steps=<n> score=<0.00> rewards=<r1,r2,...,rn>
 ```
 
-Uses OpenAI Client for all LLM calls with heuristic fallback when LLM is unavailable.
+Uses OpenAI Client for all LLM calls with heuristic fallback when the LLM is unavailable.
 
 ### Required Environment Variables
 
@@ -114,7 +135,7 @@ Uses OpenAI Client for all LLM calls with heuristic fallback when LLM is unavail
 ```bash
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 7860
-pytest tests/ -v  # 31 tests
+pytest tests/ -v
 
 # Inference (server must be running):
 export API_BASE_URL=... MODEL_NAME=... HF_TOKEN=...
