@@ -7,12 +7,9 @@ from app.models import (
     Action,
     ActionType,
     CoverageFlags,
-    Difficulty,
     GradeReport,
     Observation,
-    ResetResponse,
-    StateResponse,
-    StepResult,
+    State,
     TaskSpec,
 )
 from app.reward import compute_step_reward, newly_satisfied_requirements
@@ -34,14 +31,16 @@ class TutoringEnv:
         self._cumulative_reward: float = 0.0
         self._last_action_result: str | None = None
         self._final_grade: GradeReport | None = None
+        self._last_step_reward: float | None = None
 
     # ── public interface ───────────────────────────────────────────────
 
-    def reset(self, task_id: str | None = None) -> ResetResponse:
+    def reset(self, task_id: str | None = None, episode_id: str | None = None) -> Observation:
+        """Reset and return the initial Observation (OpenEnv-compliant)."""
         tid = task_id or default_task_id()
         task = get_task(tid)
         self._task = task
-        self._episode_id = uuid.uuid4().hex[:12]
+        self._episode_id = episode_id or uuid.uuid4().hex[:12]
         self._step_count = 0
         self._done = False
         self._action_history = []
@@ -51,17 +50,13 @@ class TutoringEnv:
         self._cumulative_reward = 0.0
         self._last_action_result = None
         self._final_grade = None
-        return ResetResponse(
-            episode_id=self._episode_id,
-            observation=self._observation(),
-            done=False,
-        )
+        self._last_step_reward = None
+        return self._observation()
 
-    def step(self, episode_id: str, action: Action) -> StepResult:
+    def step(self, action: Action) -> Observation:
+        """Process action and return the resulting Observation (OpenEnv-compliant)."""
         if self._done:
             raise RuntimeError("Episode is done. Call reset() first.")
-        if episode_id != self._episode_id:
-            raise ValueError("Episode ID mismatch.")
 
         task = self._task
         assert task is not None
@@ -93,9 +88,9 @@ class TutoringEnv:
         )
         step_reward = reward_bd.total
         self._cumulative_reward += step_reward
+        self._last_step_reward = step_reward
 
         # Check termination
-        info: dict = {"reward_breakdown": reward_bd.model_dump()}
         if action.action_type == ActionType.FINALIZE_PLAN:
             self._done = True
         elif self._step_count >= task.constraints.max_steps:
@@ -110,21 +105,16 @@ class TutoringEnv:
                 satisfied_requirements=self._satisfied,
                 step_count=self._step_count,
             )
-            info["final_grade"] = self._final_grade.model_dump()
 
-        return StepResult(
-            observation=self._observation(),
-            reward=round(step_reward, 4),
-            done=self._done,
-            info=info,
-        )
+        return self._observation()
 
-    def state(self) -> StateResponse:
+    @property
+    def state(self) -> State:
         task = self._task
-        return StateResponse(
-            episode_id=self._episode_id,
-            task_id=task.id if task else "",
+        return State(
+            episode_id=self._episode_id or None,
             step_count=self._step_count,
+            task_id=task.id if task else "",
             max_steps=task.constraints.max_steps if task else 0,
             done=self._done,
             cumulative_reward=round(self._cumulative_reward, 4),
@@ -133,12 +123,30 @@ class TutoringEnv:
             final_grade=self._final_grade,
         )
 
+    @property
+    def last_step_reward(self) -> float | None:
+        return self._last_step_reward
+
+    @property
+    def is_done(self) -> bool:
+        return self._done
+
+    @property
+    def final_grade(self) -> GradeReport | None:
+        return self._final_grade
+
     # ── internal ───────────────────────────────────────────────────────
 
     def _observation(self) -> Observation:
         task = self._task
         assert task is not None
         return Observation(
+            done=self._done,
+            reward=self._last_step_reward,
+            metadata={
+                "episode_id": self._episode_id,
+                "final_grade": self._final_grade.model_dump() if self._final_grade else None,
+            },
             task_id=task.id,
             difficulty=task.difficulty,
             learner=task.learner,

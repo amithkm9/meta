@@ -1,25 +1,29 @@
 # SignAdapt — Adaptive Sign-Language Tutoring Environment
 
-An OpenEnv-compliant reinforcement learning environment where an AI agent learns to plan **adaptive sign-language teaching interventions** for deaf and hard-of-hearing learners.
+An **OpenEnv-compliant** reinforcement learning environment where an AI agent learns to plan **adaptive sign-language teaching interventions** for deaf and hard-of-hearing learners.
 
 ## Problem Statement
 
 Teaching sign language effectively requires adaptive, sequential decision-making. A tutor must assess learner errors (handshape, movement, location, timing), select appropriate interventions, and build a coherent lesson plan — all while respecting the learner's support needs and cognitive constraints.
 
-**SignAdapt** turns this pedagogical planning problem into a structured environment that an RL or LLM agent can interact with step by step.
+**SignAdapt** turns this pedagogical planning problem into a structured environment that an RL or LLM agent can interact with step by step via the standard OpenEnv `reset()` / `step()` / `state()` API.
 
 ## Why This Environment Is Real-World
 
-- **Grounded in ASL pedagogy**: Error types (handshape, movement, location, timing, orientation) reflect actual sign production challenges.
-- **Accessibility-focused**: Learner profiles include support needs like visual aids, slowed pacing, and attention support.
-- **Sequential decision-making**: Good tutoring is adaptive and ordered — not a one-shot prompt.
-- **Deterministic grading**: All scoring is based on structured coverage flags and requirement tracking, not subjective evaluation.
+- **Grounded in ASL pedagogy**: Error types (handshape, movement, location, timing, orientation) reflect actual sign production challenges documented in deaf education research.
+- **Accessibility-focused**: Learner profiles include support needs like visual aids, slowed pacing, attention support, and tactile guidance.
+- **Sequential decision-making**: Good tutoring is adaptive and ordered — not a one-shot prompt. The agent must reason about what the learner needs *next*.
+- **Deterministic grading**: All scoring is based on structured coverage flags and requirement tracking, not subjective evaluation. Scores are always in `[0.0, 1.0]`.
 
 ## Observation Space
 
-Each observation includes:
+Each observation follows the OpenEnv `Observation` contract (`done`, `reward`, `metadata`) plus domain-specific fields:
+
 | Field | Type | Description |
 |---|---|---|
+| `done` | bool | Whether the episode has terminated |
+| `reward` | float/null | Reward from the last action |
+| `metadata` | object | Episode ID, final grade (when done) |
 | `task_id` | string | Current task identifier |
 | `difficulty` | enum | easy, medium, hard |
 | `learner` | object | Age band, proficiency, support needs |
@@ -35,7 +39,9 @@ Each observation includes:
 
 ## Action Space
 
-| Action | Purpose |
+Actions follow the OpenEnv `Action` contract (`metadata`) plus domain fields:
+
+| Action Type | Purpose |
 |---|---|
 | `select_prerequisite_sign` | Teach a foundational sign first |
 | `slow_motion_demo` | Slowed demonstration for timing/movement |
@@ -66,6 +72,38 @@ Each observation includes:
 
 **Final grade** (0.0–1.0) uses the same components computed over the full episode. Pass threshold: **0.70**.
 
+## API Endpoints (OpenEnv-Compliant)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/health` | Returns `{"status": "healthy"}` |
+| GET | `/metadata` | Environment name, description, version |
+| GET | `/schema` | JSON schemas for action, observation, state |
+| POST | `/reset` | Reset environment, returns initial observation |
+| POST | `/step` | Submit action `{"action": {...}}`, returns observation |
+| GET | `/state` | Current episode state (episode_id, step_count, etc.) |
+| GET | `/tasks` | List available tasks (extra endpoint) |
+
+### Reset Request/Response
+
+```json
+// POST /reset
+{"task_id": "easy_remediate_handshape"}
+
+// Response
+{"observation": {...}, "reward": null, "done": false}
+```
+
+### Step Request/Response
+
+```json
+// POST /step
+{"action": {"action_type": "slow_motion_demo", "rationale": "...", "payload": {}}}
+
+// Response
+{"observation": {...}, "reward": 0.45, "done": false}
+```
+
 ## Local Setup
 
 ```bash
@@ -95,16 +133,6 @@ export OPENAI_API_KEY=sk-...
 python inference.py
 ```
 
-## API Endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/health` | Health check |
-| GET | `/tasks` | List available tasks |
-| POST | `/reset` | Start a new episode |
-| POST | `/step` | Submit an action |
-| GET | `/state` | Get current episode state |
-
 ## Docker
 
 ```bash
@@ -115,3 +143,13 @@ docker run -p 7860:7860 signadapt
 ## Hugging Face Spaces
 
 Deploy as a Docker Space. The app binds to `0.0.0.0:7860` by default, which is the expected port for HF Spaces.
+
+## Environment Variables
+
+| Variable | Description |
+|---|---|
+| `API_BASE_URL` | LLM API endpoint (for inference.py) |
+| `MODEL_NAME` | Model identifier for inference |
+| `HF_TOKEN` | Hugging Face API key |
+| `OPENAI_API_KEY` | OpenAI API key (for inference.py) |
+| `APP_PORT` | Server port (default: 7860) |

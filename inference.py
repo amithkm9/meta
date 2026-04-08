@@ -3,6 +3,8 @@
 
 Uses an OpenAI-compatible LLM to step through a tutoring episode.
 Falls back to a heuristic policy when the LLM output is invalid.
+
+Emits structured stdout logs: [START], [STEP], [END].
 """
 
 from __future__ import annotations
@@ -10,7 +12,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 
 import httpx
 from openai import OpenAI
@@ -51,7 +52,6 @@ def heuristic_action(obs: dict) -> dict:
     """Simple rule-based fallback policy."""
     coverage = obs.get("coverage", {})
     difficulty = obs.get("difficulty", "easy")
-    error_types = [ep["error_type"] for ep in obs.get("error_patterns", [])]
     remaining = obs.get("remaining_steps", 1)
 
     if remaining <= 1:
@@ -147,16 +147,17 @@ def llm_select_action(obs: dict) -> dict | None:
 def run_episode(task_id: str) -> dict:
     http = httpx.Client(base_url=ENV_URL, timeout=30)
 
-    # Reset
+    # Reset — OpenEnv-compliant: POST /reset with optional task_id
     reset_resp = http.post("/reset", json={"task_id": task_id}).json()
-    episode_id = reset_resp["episode_id"]
     obs = reset_resp["observation"]
-    done = reset_resp["done"]
+    done = reset_resp.get("done", False)
+    episode_id = obs.get("metadata", {}).get("episode_id", "unknown")
 
     print(f"[START] task={task_id} episode={episode_id}")
 
     step_num = 0
-    final_info = {}
+    reward = 0.0
+    final_grade = {}
 
     while not done and step_num < MAX_SAFETY_STEPS:
         # Try LLM, fall back to heuristic
@@ -166,26 +167,26 @@ def run_episode(task_id: str) -> dict:
 
         print(f"[STEP] step={step_num} action={action['action_type']} rationale={action['rationale']}")
 
-        step_resp = http.post("/step", json={
-            "episode_id": episode_id,
-            "action": action,
-        }).json()
+        # OpenEnv-compliant: POST /step with {action: {...}}
+        step_resp = http.post("/step", json={"action": action}).json()
 
         obs = step_resp["observation"]
-        reward = step_resp["reward"]
-        done = step_resp["done"]
-        info = step_resp.get("info", {})
-        final_info = info
+        reward = step_resp.get("reward", 0.0) or 0.0
+        done = step_resp.get("done", False)
+
+        # Check for final grade in observation metadata
+        grade_data = obs.get("metadata", {}).get("final_grade")
+        if grade_data:
+            final_grade = grade_data
 
         print(f"[STEP] step={step_num} reward={reward} done={done}")
         step_num += 1
 
-    grade = final_info.get("final_grade", {})
-    score = grade.get("total_score", 0.0)
-    passed = grade.get("passed", False)
+    score = final_grade.get("total_score", 0.0) if final_grade else 0.0
+    passed = final_grade.get("passed", False) if final_grade else False
 
     print(f"[END] task={task_id} score={score} passed={passed}")
-    return grade
+    return final_grade
 
 
 def main() -> None:
