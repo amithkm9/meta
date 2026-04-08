@@ -24,6 +24,14 @@ env = TutoringEnv()
 
 # ── OpenEnv-standard endpoints ─────────────────────────────────────────
 
+@router.get("/")
+def root() -> dict:
+    return {
+        "status": "healthy",
+        "name": "SignAdapt",
+        "message": "OpenEnv environment is running.",
+    }
+
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(status="healthy")
