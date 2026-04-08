@@ -4,19 +4,24 @@ description: >
   Adaptive sign-language tutoring environment with dynamic learner simulation.
   An agent plans step-by-step teaching interventions for a simulated
   deaf/hard-of-hearing learner whose comprehension, attention, frustration,
-  and confidence evolve in response to each intervention.
+  and confidence evolve in response to each intervention. Comprehension is
+  hidden state — the agent must assess to reveal it. Grading is outcome-based:
+  did the learner actually improve?
 author: SignAdapt Team
 
 tasks:
   - id: easy_remediate_handshape
     difficulty: easy
     description: Single handshape error remediation for a young beginner learner.
+    max_steps: 6
   - id: medium_movement_timing_scaffold
     difficulty: medium
     description: Two-error scaffolded correction requiring assessment and targeted sequencing.
+    max_steps: 8
   - id: hard_multi_error_adaptive
     difficulty: hard
     description: Three-error adaptive plan with low attention, high frustration, tight step budget.
+    max_steps: 10
 
 scoring:
   range: [0.0, 1.0]
@@ -28,8 +33,40 @@ scoring:
     - learner_wellbeing: 0.15-0.25
     - efficiency: 0.20
 
+action_space:
+  type: discrete
+  actions:
+    - select_prerequisite_sign
+    - slow_motion_demo
+    - add_location_cue
+    - add_movement_hint
+    - choose_feedback_style
+    - generate_micro_drill
+    - quick_assessment
+    - revision_loop
+    - finalize_plan
+
+observation_space:
+  includes:
+    - task_id
+    - difficulty
+    - error_patterns
+    - learner_signals (engagement, emotional_state, intervention_feedback)
+    - assessed_comprehension (only after quick_assessment)
+    - coverage flags
+    - remaining_steps
+
 simulation:
   learner_state: [comprehension, attention, frustration, confidence]
   hidden_state: comprehension (revealed only via quick_assessment)
   stochastic: true (seeded for reproducibility)
   sequence_bonuses: [demo_before_drill, assess_before_revision, cue_before_drill]
+
+endpoints:
+  health: GET /health
+  metadata: GET /metadata
+  schema: GET /schema
+  reset: POST /reset
+  step: POST /step
+  state: GET /state
+  tasks: GET /tasks

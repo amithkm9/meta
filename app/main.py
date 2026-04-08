@@ -4,7 +4,14 @@ from app.routes import router
 
 app = FastAPI(
     title="SignAdapt",
-    description="Adaptive Sign-Language Tutoring Environment",
+    description=(
+        "OpenEnv-compliant adaptive sign-language tutoring environment. "
+        "An AI agent plans step-by-step teaching interventions for a simulated "
+        "deaf/hard-of-hearing learner whose comprehension, attention, frustration, "
+        "and confidence evolve dynamically. The learner's comprehension is hidden "
+        "and can only be revealed through assessment actions. Grading is outcome-based: "
+        "did the learner actually improve?"
+    ),
     version="1.0.0",
 )
 

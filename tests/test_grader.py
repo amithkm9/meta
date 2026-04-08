@@ -192,3 +192,88 @@ def test_grade_reasoning_contains_info():
     )
     assert len(grade.reasoning) > 0
     assert "Strength" in grade.reasoning or "Weakness" in grade.reasoning
+
+
+def test_grader_produces_varied_scores():
+    """Different strategies must produce different scores (anti-disqualification check).
+    Graders that always return the same score are disqualified."""
+    task = get_task("medium_movement_timing_scaffold")
+
+    # Strategy A: good teaching sequence
+    grade_a = grade_episode(
+        task=task,
+        action_history=[
+            ActionType.QUICK_ASSESSMENT, ActionType.SLOW_MOTION_DEMO,
+            ActionType.ADD_MOVEMENT_HINT, ActionType.GENERATE_MICRO_DRILL,
+            ActionType.CHOOSE_FEEDBACK_STYLE, ActionType.FINALIZE_PLAN,
+        ],
+        coverage=CoverageFlags(
+            has_assessment=True, has_timing_support=True, has_movement_hint=True,
+            has_micro_drill=True, has_feedback_style=True, demo_before_drill=True,
+            plan_finalized=True,
+        ),
+        satisfied_requirements={"scaffolded_demo", "micro_drill", "assessment", "feedback_selection"},
+        learner=LearnerSimState(
+            comprehension={"movement": 0.75, "timing": 0.70},
+            attention=0.65, frustration=0.10, confidence=0.65,
+        ),
+        initial_comprehension={"movement": 0.25, "timing": 0.20},
+        step_count=6,
+    )
+
+    # Strategy B: just finalize immediately (worst possible)
+    grade_b = grade_episode(
+        task=task,
+        action_history=[ActionType.FINALIZE_PLAN],
+        coverage=CoverageFlags(plan_finalized=True),
+        satisfied_requirements=set(),
+        learner=LearnerSimState(
+            comprehension={"movement": 0.26, "timing": 0.21},
+            attention=0.30, frustration=0.60, confidence=0.20,
+        ),
+        initial_comprehension={"movement": 0.25, "timing": 0.20},
+        step_count=1,
+    )
+
+    # Strategy C: medium effort, some actions but not well ordered
+    grade_c = grade_episode(
+        task=task,
+        action_history=[
+            ActionType.SLOW_MOTION_DEMO, ActionType.SLOW_MOTION_DEMO,
+            ActionType.FINALIZE_PLAN,
+        ],
+        coverage=CoverageFlags(has_timing_support=True, plan_finalized=True),
+        satisfied_requirements={"scaffolded_demo"},
+        learner=LearnerSimState(
+            comprehension={"movement": 0.45, "timing": 0.35},
+            attention=0.55, frustration=0.25, confidence=0.40,
+        ),
+        initial_comprehension={"movement": 0.25, "timing": 0.20},
+        step_count=3,
+    )
+
+    scores = {grade_a.total_score, grade_b.total_score, grade_c.total_score}
+    assert len(scores) == 3, f"All three strategies must produce distinct scores, got: {scores}"
+    assert grade_a.total_score > grade_c.total_score > grade_b.total_score
+
+
+def test_all_tasks_produce_different_scores():
+    """Each task must grade independently with different parameters."""
+    from app.env import TutoringEnv
+    from app.models import Action
+
+    env = TutoringEnv()
+    scores = []
+
+    for task_id in ["easy_remediate_handshape", "medium_movement_timing_scaffold", "hard_multi_error_adaptive"]:
+        env.reset(task_id, seed=42)
+        # Same generic strategy for all tasks
+        for at in [ActionType.SLOW_MOTION_DEMO, ActionType.ADD_MOVEMENT_HINT, ActionType.FINALIZE_PLAN]:
+            obs = env.step(Action(action_type=at, rationale="test"))
+            if obs.done:
+                break
+        assert env.final_grade is not None
+        scores.append(env.final_grade.total_score)
+
+    # At least 2 distinct scores across 3 tasks
+    assert len(set(round(s, 2) for s in scores)) >= 2, f"Scores too similar: {scores}"
