@@ -1,15 +1,3 @@
----
-title: Signadapt Env
-emoji: 👁
-colorFrom: purple
-colorTo: red
-sdk: docker
-tags:
-  - openenv
-pinned: false
-license: mit
----
-
 # SignAdapt — Adaptive Sign-Language Tutoring Environment
 
 An **OpenEnv-compliant** reinforcement learning environment where an AI agent plans **adaptive sign-language teaching interventions** for a simulated deaf/hard-of-hearing learner whose internal state (comprehension, attention, frustration, confidence) evolves dynamically in response to each intervention.
