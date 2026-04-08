@@ -89,6 +89,26 @@ Pass threshold: **0.70**. The grade includes before/after comprehension scores s
 | GET | `/state` | Episode state (episode_id, step_count, etc.) |
 | GET | `/tasks` | List available tasks |
 
+## Inference Script (OpenEnv-Compliant)
+
+The `inference.py` emits structured stdout in the required format:
+
+```
+[START] task=<task_name> env=signadapt model=<model_name>
+[STEP] step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
+[END] success=<true|false> steps=<n> score=<0.00> rewards=<r1,r2,...,rn>
+```
+
+Uses OpenAI Client for all LLM calls with heuristic fallback when LLM is unavailable.
+
+### Required Environment Variables
+
+| Variable | Description |
+|---|---|
+| `API_BASE_URL` | The API endpoint for the LLM |
+| `MODEL_NAME` | The model identifier to use for inference |
+| `HF_TOKEN` | Your Hugging Face / API key |
+
 ## Setup & Run
 
 ```bash
@@ -97,7 +117,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 7860
 pytest tests/ -v  # 31 tests
 
 # Inference (server must be running):
-export API_BASE_URL=... MODEL_NAME=... OPENAI_API_KEY=...
+export API_BASE_URL=... MODEL_NAME=... HF_TOKEN=...
 python inference.py
 ```
 
