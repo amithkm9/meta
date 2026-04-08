@@ -5,7 +5,7 @@ colorFrom: purple
 colorTo: red
 sdk: docker
 tags:
-	- openenv
+  - openenv
 pinned: false
 license: mit
 ---
