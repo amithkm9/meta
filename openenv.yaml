@@ -1,0 +1,46 @@
+name: SignAdapt
+description: >
+  Adaptive sign-language tutoring environment. An agent plans step-by-step
+  teaching interventions for deaf/hard-of-hearing learners, adapting to
+  error patterns, support needs, and pedagogical constraints.
+version: "1.0.0"
+author: SignAdapt Team
+
+environment:
+  type: http
+  base_url: http://localhost:7860
+  endpoints:
+    health: GET /health
+    tasks: GET /tasks
+    reset: POST /reset
+    step: POST /step
+    state: GET /state
+
+tasks:
+  - id: easy_remediate_handshape
+    difficulty: easy
+    description: Single-sign handshape remediation for a young learner.
+  - id: medium_fix_movement_with_scaffold
+    difficulty: medium
+    description: Scaffolded movement/timing correction with demonstration sequence.
+  - id: hard_adaptive_multi_error_plan
+    difficulty: hard
+    description: Multi-error adaptive tutoring plan under tight step budget.
+
+scoring:
+  range: [0.0, 1.0]
+  pass_threshold: 0.70
+  components:
+    - intervention_relevance: 0.25
+    - pedagogical_sequence: 0.25
+    - learner_need_alignment: 0.20
+    - task_completeness: 0.20
+    - efficiency: 0.10
+
+interface:
+  observation_type: structured_json
+  action_type: structured_json
+  action_fields:
+    - action_type: enum
+    - rationale: string
+    - payload: object

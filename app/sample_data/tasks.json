@@ -1,0 +1,155 @@
+[
+  {
+    "id": "easy_remediate_handshape",
+    "difficulty": "easy",
+    "learner": {
+      "age_band": "6-8",
+      "proficiency": "beginner",
+      "primary_language": "ASL",
+      "support_needs": ["visual_aids"]
+    },
+    "lesson_goal": {
+      "target_sign": "HELLO",
+      "description": "Learner produces the sign HELLO with correct open-palm handshape and forehead-outward movement."
+    },
+    "error_patterns": [
+      {
+        "error_type": "handshape",
+        "severity": 0.7,
+        "description": "Learner uses a fist instead of an open palm for HELLO."
+      }
+    ],
+    "constraints": {
+      "max_steps": 6,
+      "required_outputs": [
+        "corrective_intervention",
+        "assessment"
+      ]
+    },
+    "grader_weights": {
+      "intervention_relevance": 0.30,
+      "pedagogical_sequence": 0.20,
+      "learner_need_alignment": 0.20,
+      "task_completeness": 0.20,
+      "efficiency": 0.10
+    },
+    "ideal_action_order": [
+      "slow_motion_demo",
+      "add_movement_hint",
+      "choose_feedback_style",
+      "quick_assessment",
+      "finalize_plan"
+    ]
+  },
+  {
+    "id": "medium_fix_movement_with_scaffold",
+    "difficulty": "medium",
+    "learner": {
+      "age_band": "9-12",
+      "proficiency": "intermediate",
+      "primary_language": "ASL",
+      "support_needs": ["slowed_pacing", "repetition"]
+    },
+    "lesson_goal": {
+      "target_sign": "THANK-YOU",
+      "description": "Learner produces THANK-YOU with correct chin-to-outward movement arc and timing."
+    },
+    "error_patterns": [
+      {
+        "error_type": "movement",
+        "severity": 0.6,
+        "description": "Learner moves hand straight out instead of the chin-touch-then-forward arc."
+      },
+      {
+        "error_type": "timing",
+        "severity": 0.4,
+        "description": "Learner rushes the sign, losing the deliberate pause at chin contact."
+      }
+    ],
+    "constraints": {
+      "max_steps": 8,
+      "required_outputs": [
+        "scaffolded_demo",
+        "micro_drill",
+        "assessment",
+        "feedback_selection"
+      ]
+    },
+    "grader_weights": {
+      "intervention_relevance": 0.25,
+      "pedagogical_sequence": 0.25,
+      "learner_need_alignment": 0.20,
+      "task_completeness": 0.20,
+      "efficiency": 0.10
+    },
+    "ideal_action_order": [
+      "slow_motion_demo",
+      "add_movement_hint",
+      "generate_micro_drill",
+      "choose_feedback_style",
+      "quick_assessment",
+      "finalize_plan"
+    ]
+  },
+  {
+    "id": "hard_adaptive_multi_error_plan",
+    "difficulty": "hard",
+    "learner": {
+      "age_band": "13-17",
+      "proficiency": "beginner",
+      "primary_language": "ASL",
+      "support_needs": ["visual_aids", "slowed_pacing", "attention_support"]
+    },
+    "lesson_goal": {
+      "target_sign": "HELP",
+      "description": "Learner produces HELP with correct A-handshape on open palm, upward movement, and proper spatial location."
+    },
+    "error_patterns": [
+      {
+        "error_type": "movement",
+        "severity": 0.7,
+        "description": "Learner pushes sideways instead of lifting upward."
+      },
+      {
+        "error_type": "location",
+        "severity": 0.6,
+        "description": "Learner positions hands too far from the body midline."
+      },
+      {
+        "error_type": "handshape",
+        "severity": 0.3,
+        "description": "Non-dominant hand not fully flat—fingers slightly curled."
+      }
+    ],
+    "constraints": {
+      "max_steps": 10,
+      "required_outputs": [
+        "prerequisite_sign",
+        "visual_cue",
+        "movement_correction",
+        "micro_drill",
+        "assessment",
+        "revision",
+        "feedback_selection"
+      ]
+    },
+    "grader_weights": {
+      "intervention_relevance": 0.25,
+      "pedagogical_sequence": 0.25,
+      "learner_need_alignment": 0.20,
+      "task_completeness": 0.20,
+      "efficiency": 0.10
+    },
+    "ideal_action_order": [
+      "select_prerequisite_sign",
+      "slow_motion_demo",
+      "add_location_cue",
+      "add_movement_hint",
+      "generate_micro_drill",
+      "choose_feedback_style",
+      "quick_assessment",
+      "revision_loop",
+      "finalize_plan"
+    ]
+  }
+]
