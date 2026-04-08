@@ -145,6 +145,38 @@ def _act(action_type: str, rationale: str, payload: dict | None = None) -> dict:
     return {"action_type": action_type, "rationale": rationale, "payload": payload or {}}
 
 
+def _apply_action_guardrails(obs: dict, action: dict, history: list[str]) -> dict | None:
+    """Return a corrected action when LLM output is likely low-value; otherwise None."""
+    action_type = action.get("action_type")
+    if action_type not in VALID_ACTIONS:
+        return None
+
+    coverage = obs.get("coverage", {})
+    remaining = obs.get("remaining_steps", 1)
+
+    # Last step should always finalize.
+    if remaining <= 1 and action_type != "finalize_plan":
+        return _act("finalize_plan", "Last step guardrail: finalize episode.")
+
+    # Prevent repeated same-action loops that hurt efficiency and pedagogy.
+    if len(history) >= 2 and history[-1] == action_type and history[-2] == action_type:
+        return heuristic_action(obs)
+
+    # Avoid repeating already-covered setup actions.
+    if action_type == "slow_motion_demo" and coverage.get("has_timing_support"):
+        return heuristic_action(obs)
+    if action_type == "add_location_cue" and coverage.get("has_visual_cue"):
+        return heuristic_action(obs)
+    if action_type == "add_movement_hint" and coverage.get("has_movement_hint"):
+        return heuristic_action(obs)
+    if action_type == "choose_feedback_style" and coverage.get("has_feedback_style"):
+        return heuristic_action(obs)
+    if action_type == "generate_micro_drill" and coverage.get("has_micro_drill"):
+        return heuristic_action(obs)
+
+    return None
+
+
 # ── LLM action selection ─────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are an expert sign-language tutoring planner. You plan adaptive interventions for a simulated deaf/hard-of-hearing learner.
@@ -217,6 +249,7 @@ def run_episode(task_id: str) -> dict:
     http = httpx.Client(base_url=ENV_URL, timeout=30)
 
     rewards: List[float] = []
+    action_history: List[str] = []
     steps_taken = 0
     score = 0.0
     success = False
@@ -236,6 +269,10 @@ def run_episode(task_id: str) -> dict:
             action = llm_select_action(obs)
             if action is None:
                 action = heuristic_action(obs)
+            else:
+                corrected = _apply_action_guardrails(obs, action, action_history)
+                if corrected is not None:
+                    action = corrected
 
             error_msg = None
             try:
@@ -253,6 +290,7 @@ def run_episode(task_id: str) -> dict:
                 error_msg = str(e)
 
             rewards.append(reward)
+            action_history.append(action["action_type"])
             steps_taken = step
 
             log_step(step=step, action=action["action_type"], reward=reward, done=done, error=error_msg)
