@@ -4,6 +4,8 @@ emoji: 👁
 colorFrom: purple
 colorTo: red
 sdk: docker
+tags:
+	- openenv
 pinned: false
 license: mit
 ---
