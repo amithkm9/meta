@@ -72,11 +72,47 @@ class ErrorPattern(BaseModel):
 class TutoringConstraint(BaseModel):
     max_steps: int
     required_outputs: list[str]
+    comprehension_target: float = Field(
+        default=0.65,
+        description="Minimum comprehension the learner must reach per error for a pass.",
+    )
 
 
-class TutoringRequirement(BaseModel):
-    name: str
-    satisfied: bool = False
+# ── Hidden learner simulation state ───────────────────────────────────
+
+class LearnerSimState(BaseModel):
+    """Internal learner state that evolves during the episode.
+    Comprehension per error is HIDDEN unless the agent assesses."""
+    comprehension: dict[str, float] = Field(
+        default_factory=dict,
+        description="Comprehension per ErrorType value — 0.0 (no understanding) to 1.0 (mastered).",
+    )
+    attention: float = Field(default=1.0, ge=0.0, le=1.0)
+    frustration: float = Field(default=0.0, ge=0.0, le=1.0)
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class SimulationParams(BaseModel):
+    """Per-task parameters that control the learner simulation."""
+    initial_comprehension: dict[str, float] = {}
+    initial_attention: float = 0.9
+    initial_frustration: float = 0.1
+    initial_confidence: float = 0.5
+    attention_decay_per_step: float = 0.06
+    default_seed: int = 42
+
+
+# ── Learner signals (observable by agent) ──────────────────────────────
+
+class LearnerSignals(BaseModel):
+    """Qualitative feedback the agent can observe each step."""
+    engagement: str = ""
+    emotional_state: str = ""
+    intervention_feedback: str = ""
+    assessed_comprehension: dict[str, float] | None = Field(
+        default=None,
+        description="Only populated after a quick_assessment action.",
+    )
 
 
 # ── Coverage flags ─────────────────────────────────────────────────────
@@ -91,17 +127,18 @@ class CoverageFlags(BaseModel):
     has_assessment: bool = False
     has_revision: bool = False
     plan_finalized: bool = False
+    demo_before_drill: bool = False
+    cue_before_drill: bool = False
+    assessed_before_revision: bool = False
 
 
 # ── Observation (OpenEnv-compliant) ────────────────────────────────────
-# OpenEnv Observation base has: done, reward, metadata
-# We extend it with our domain fields.
 
 class Observation(BaseModel):
     done: bool = False
     reward: float | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    # Domain-specific fields
+    # Domain-specific
     task_id: str = ""
     difficulty: Difficulty = Difficulty.EASY
     learner: LearnerProfile = Field(default_factory=lambda: LearnerProfile(age_band="", proficiency=""))
@@ -113,13 +150,11 @@ class Observation(BaseModel):
     remaining_steps: int = 0
     allowed_actions: list[ActionType] = []
     coverage: CoverageFlags = Field(default_factory=CoverageFlags)
-    last_action_result: str | None = None
+    learner_signals: LearnerSignals = Field(default_factory=LearnerSignals)
     step_count: int = 0
 
 
 # ── Action (OpenEnv-compliant) ─────────────────────────────────────────
-# OpenEnv Action base has: metadata
-# We extend with our domain fields.
 
 class Action(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -129,12 +164,10 @@ class Action(BaseModel):
 
 
 # ── State (OpenEnv-compliant) ──────────────────────────────────────────
-# OpenEnv State base has: episode_id, step_count
 
 class State(BaseModel):
     episode_id: str | None = None
     step_count: int = 0
-    # Domain-specific
     task_id: str = ""
     max_steps: int = 0
     done: bool = False
@@ -147,10 +180,9 @@ class State(BaseModel):
 # ── Reward ─────────────────────────────────────────────────────────────
 
 class RewardBreakdown(BaseModel):
-    intervention_relevance: float = 0.0
-    pedagogical_sequence: float = 0.0
-    learner_need_alignment: float = 0.0
-    task_completeness: float = 0.0
+    comprehension_gain: float = 0.0
+    pedagogical_quality: float = 0.0
+    learner_wellbeing: float = 0.0
     efficiency: float = 0.0
     total: float = 0.0
 
@@ -164,6 +196,7 @@ class TaskSpec(BaseModel):
     lesson_goal: LessonGoal
     error_patterns: list[ErrorPattern]
     constraints: TutoringConstraint
+    simulation: SimulationParams = Field(default_factory=SimulationParams)
     grader_weights: dict[str, float] = {}
     ideal_action_order: list[ActionType] = []
 
@@ -175,6 +208,8 @@ class GradeReport(BaseModel):
     sub_scores: RewardBreakdown
     passed: bool
     reasoning: str
+    comprehension_before: dict[str, float] = {}
+    comprehension_after: dict[str, float] = {}
     missing_requirements: list[str] = []
 
 
@@ -184,7 +219,6 @@ class ResetRequest(BaseModel):
     model_config = {"extra": "allow"}
     seed: int | None = None
     episode_id: str | None = None
-    # Custom extension
     task_id: str | None = None
 
 
@@ -222,8 +256,6 @@ class EnvironmentMetadata(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "healthy"
 
-
-# ── Extra: task listing ────────────────────────────────────────────────
 
 class TaskSummary(BaseModel):
     id: str

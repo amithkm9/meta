@@ -21,28 +21,34 @@
     ],
     "constraints": {
       "max_steps": 6,
-      "required_outputs": [
-        "corrective_intervention",
-        "assessment"
-      ]
+      "required_outputs": ["corrective_intervention", "assessment"],
+      "comprehension_target": 0.65
+    },
+    "simulation": {
+      "initial_comprehension": {"handshape": 0.25},
+      "initial_attention": 0.92,
+      "initial_frustration": 0.03,
+      "initial_confidence": 0.60,
+      "attention_decay_per_step": 0.035,
+      "default_seed": 101
     },
     "grader_weights": {
-      "intervention_relevance": 0.30,
-      "pedagogical_sequence": 0.20,
-      "learner_need_alignment": 0.20,
-      "task_completeness": 0.20,
-      "efficiency": 0.10
+      "comprehension_gain": 0.40,
+      "pedagogical_quality": 0.25,
+      "learner_wellbeing": 0.15,
+      "efficiency": 0.20
     },
     "ideal_action_order": [
       "slow_motion_demo",
       "add_movement_hint",
       "choose_feedback_style",
+      "generate_micro_drill",
       "quick_assessment",
       "finalize_plan"
     ]
   },
   {
-    "id": "medium_fix_movement_with_scaffold",
+    "id": "medium_movement_timing_scaffold",
     "difficulty": "medium",
     "learner": {
       "age_band": "9-12",
@@ -52,37 +58,41 @@
     },
     "lesson_goal": {
       "target_sign": "THANK-YOU",
-      "description": "Learner produces THANK-YOU with correct chin-to-outward movement arc and timing."
+      "description": "Learner produces THANK-YOU with correct chin-to-outward movement arc and deliberate timing."
     },
     "error_patterns": [
       {
         "error_type": "movement",
-        "severity": 0.6,
+        "severity": 0.65,
         "description": "Learner moves hand straight out instead of the chin-touch-then-forward arc."
       },
       {
         "error_type": "timing",
-        "severity": 0.4,
+        "severity": 0.50,
         "description": "Learner rushes the sign, losing the deliberate pause at chin contact."
       }
     ],
     "constraints": {
       "max_steps": 8,
-      "required_outputs": [
-        "scaffolded_demo",
-        "micro_drill",
-        "assessment",
-        "feedback_selection"
-      ]
+      "required_outputs": ["scaffolded_demo", "micro_drill", "assessment", "feedback_selection"],
+      "comprehension_target": 0.65
+    },
+    "simulation": {
+      "initial_comprehension": {"movement": 0.25, "timing": 0.20},
+      "initial_attention": 0.82,
+      "initial_frustration": 0.15,
+      "initial_confidence": 0.45,
+      "attention_decay_per_step": 0.055,
+      "default_seed": 202
     },
     "grader_weights": {
-      "intervention_relevance": 0.25,
-      "pedagogical_sequence": 0.25,
-      "learner_need_alignment": 0.20,
-      "task_completeness": 0.20,
-      "efficiency": 0.10
+      "comprehension_gain": 0.35,
+      "pedagogical_quality": 0.25,
+      "learner_wellbeing": 0.20,
+      "efficiency": 0.20
     },
     "ideal_action_order": [
+      "quick_assessment",
       "slow_motion_demo",
       "add_movement_hint",
       "generate_micro_drill",
@@ -92,7 +102,7 @@
     ]
   },
   {
-    "id": "hard_adaptive_multi_error_plan",
+    "id": "hard_multi_error_adaptive",
     "difficulty": "hard",
     "learner": {
       "age_band": "13-17",
@@ -102,45 +112,46 @@
     },
     "lesson_goal": {
       "target_sign": "HELP",
-      "description": "Learner produces HELP with correct A-handshape on open palm, upward movement, and proper spatial location."
+      "description": "Learner produces HELP with correct A-handshape on open palm, upward movement, and proper spatial location near chest."
     },
     "error_patterns": [
       {
         "error_type": "movement",
-        "severity": 0.7,
-        "description": "Learner pushes sideways instead of lifting upward."
+        "severity": 0.75,
+        "description": "Learner pushes sideways instead of lifting upward from the open palm."
       },
       {
         "error_type": "location",
-        "severity": 0.6,
-        "description": "Learner positions hands too far from the body midline."
+        "severity": 0.60,
+        "description": "Learner positions hands too far from the body midline, near the waist instead of chest."
       },
       {
         "error_type": "handshape",
-        "severity": 0.3,
-        "description": "Non-dominant hand not fully flat—fingers slightly curled."
+        "severity": 0.40,
+        "description": "Non-dominant hand not fully flat—fingers slightly curled instead of open palm."
       }
     ],
     "constraints": {
       "max_steps": 10,
-      "required_outputs": [
-        "prerequisite_sign",
-        "visual_cue",
-        "movement_correction",
-        "micro_drill",
-        "assessment",
-        "revision",
-        "feedback_selection"
-      ]
+      "required_outputs": ["prerequisite_sign", "visual_cue", "movement_correction", "micro_drill", "assessment", "revision", "feedback_selection"],
+      "comprehension_target": 0.60
+    },
+    "simulation": {
+      "initial_comprehension": {"movement": 0.10, "location": 0.15, "handshape": 0.30},
+      "initial_attention": 0.68,
+      "initial_frustration": 0.25,
+      "initial_confidence": 0.30,
+      "attention_decay_per_step": 0.065,
+      "default_seed": 303
     },
     "grader_weights": {
-      "intervention_relevance": 0.25,
-      "pedagogical_sequence": 0.25,
-      "learner_need_alignment": 0.20,
-      "task_completeness": 0.20,
-      "efficiency": 0.10
+      "comprehension_gain": 0.35,
+      "pedagogical_quality": 0.20,
+      "learner_wellbeing": 0.25,
+      "efficiency": 0.20
     },
     "ideal_action_order": [
+      "quick_assessment",
       "select_prerequisite_sign",
       "slow_motion_demo",
       "add_location_cue",

@@ -40,3 +40,9 @@ def get_task(task_id: str) -> TaskSpec:
 
 def default_task_id() -> str:
     return _load()[0].id
+
+
+def reload_tasks() -> None:
+    """Force reload from disk (useful for testing)."""
+    global _task_cache
+    _task_cache = None

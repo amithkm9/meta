@@ -55,7 +55,7 @@ def schema() -> SchemaResponse:
 @router.post("/reset", response_model=ResetResponse)
 def reset(request: ResetRequest = ResetRequest()) -> ResetResponse:
     try:
-        obs = env.reset(task_id=request.task_id, episode_id=request.episode_id)
+        obs = env.reset(task_id=request.task_id, episode_id=request.episode_id, seed=request.seed)
         return ResetResponse(
             observation=obs.model_dump(),
             reward=None,

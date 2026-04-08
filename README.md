@@ -1,155 +1,111 @@
 # SignAdapt — Adaptive Sign-Language Tutoring Environment
 
-An **OpenEnv-compliant** reinforcement learning environment where an AI agent learns to plan **adaptive sign-language teaching interventions** for deaf and hard-of-hearing learners.
+An **OpenEnv-compliant** reinforcement learning environment where an AI agent must plan **adaptive sign-language teaching interventions** for a simulated deaf/hard-of-hearing learner whose internal state (comprehension, attention, frustration, confidence) evolves dynamically in response to each intervention.
 
-## Problem Statement
+## What Makes This Different
 
-Teaching sign language effectively requires adaptive, sequential decision-making. A tutor must assess learner errors (handshape, movement, location, timing), select appropriate interventions, and build a coherent lesson plan — all while respecting the learner's support needs and cognitive constraints.
+Most hackathon environments are checklists: do X, get points. **SignAdapt is a genuine simulation.**
 
-**SignAdapt** turns this pedagogical planning problem into a structured environment that an RL or LLM agent can interact with step by step via the standard OpenEnv `reset()` / `step()` / `state()` API.
+The learner has **hidden internal state** that the agent cannot see directly:
+- **Comprehension** per error type (0.0–1.0) — how well the learner understands each aspect of the sign
+- **Attention** — decays over time, recovers with engaging interventions
+- **Frustration** — builds with failed or repetitive interventions, reduced by encouragement
+- **Confidence** — grows with successful learning, drops when confused
 
-## Why This Environment Is Real-World
+The agent must:
+1. **Assess before acting** — comprehension is hidden unless the agent uses `quick_assessment`
+2. **Sequence strategically** — demo before drill gives 1.3x effectiveness; assess before revision gives 1.25x
+3. **Manage learner wellbeing** — a frustrated learner learns 40% slower; low attention reduces all gains
+4. **Adapt to signals** — qualitative feedback reveals engagement and emotional state without exact numbers
+5. **Balance exploration vs exploitation** — spend steps assessing, or trust signals and teach?
 
-- **Grounded in ASL pedagogy**: Error types (handshape, movement, location, timing, orientation) reflect actual sign production challenges documented in deaf education research.
-- **Accessibility-focused**: Learner profiles include support needs like visual aids, slowed pacing, attention support, and tactile guidance.
-- **Sequential decision-making**: Good tutoring is adaptive and ordered — not a one-shot prompt. The agent must reason about what the learner needs *next*.
-- **Deterministic grading**: All scoring is based on structured coverage flags and requirement tracking, not subjective evaluation. Scores are always in `[0.0, 1.0]`.
+**The same action sequence produces different outcomes** depending on learner state, sequencing, and support need alignment. A hardcoded policy cannot achieve maximum score.
+
+## Grounded in ASL Pedagogy
+
+- **Error types** (handshape, movement, location, timing, orientation) reflect real sign production challenges
+- **Intervention effectiveness** varies by error type — a slow-motion demo strongly helps movement/timing but barely helps handshape
+- **Support need matching** — a visual learner benefits more from location cues; a learner needing repetition benefits from revision loops
+- **Sequence bonuses** model real pedagogical best practices: demonstrate before drilling, assess before revising
 
 ## Observation Space
 
-Each observation follows the OpenEnv `Observation` contract (`done`, `reward`, `metadata`) plus domain-specific fields:
+Observations follow the OpenEnv standard (`done`, `reward`, `metadata`) plus:
 
-| Field | Type | Description |
-|---|---|---|
-| `done` | bool | Whether the episode has terminated |
-| `reward` | float/null | Reward from the last action |
-| `metadata` | object | Episode ID, final grade (when done) |
-| `task_id` | string | Current task identifier |
-| `difficulty` | enum | easy, medium, hard |
-| `learner` | object | Age band, proficiency, support needs |
-| `lesson_goal` | object | Target sign and description |
-| `error_patterns` | list | Error type, severity, description |
-| `support_needs` | list | Learner accommodations needed |
-| `current_plan` | list | Interventions added so far |
-| `completed_requirements` | list | Satisfied grading requirements |
-| `remaining_steps` | int | Steps left in budget |
-| `coverage` | object | Boolean flags for coverage tracking |
-| `allowed_actions` | list | Valid action types |
-| `last_action_result` | string | Feedback from previous action |
+| Field | Description |
+|---|---|
+| `learner_signals.engagement` | Qualitative attention level (attentive / distracted / disengaged) |
+| `learner_signals.emotional_state` | Frustration / confidence signals |
+| `learner_signals.intervention_feedback` | How the learner responded to the last action |
+| `learner_signals.assessed_comprehension` | **Only revealed after `quick_assessment`** — actual comprehension per error |
+| `error_patterns` | What the learner is getting wrong (type, severity) |
+| `coverage` | Which intervention types have been applied |
+| `remaining_steps` | Budget remaining |
 
 ## Action Space
 
-Actions follow the OpenEnv `Action` contract (`metadata`) plus domain fields:
-
-| Action Type | Purpose |
-|---|---|
-| `select_prerequisite_sign` | Teach a foundational sign first |
-| `slow_motion_demo` | Slowed demonstration for timing/movement |
-| `add_location_cue` | Visual spatial marker for location errors |
-| `add_movement_hint` | Directional guidance for movement errors |
-| `choose_feedback_style` | Select visual/tactile/verbal/modeling feedback |
-| `generate_micro_drill` | Focused practice drill |
-| `quick_assessment` | Checkpoint learner understanding |
-| `revision_loop` | Repeat and reinforce weak segments |
-| `finalize_plan` | Submit the tutoring plan for grading |
+| Action | Effect | Side Effects |
+|---|---|---|
+| `select_prerequisite_sign` | +0.06 all errors, 1.25x boost on future actions | +attention |
+| `slow_motion_demo` | Strong movement/timing gain | +attention, enables drill bonus |
+| `add_location_cue` | Strong location gain | +attention for visual learners |
+| `add_movement_hint` | Strong movement/orientation gain | neutral |
+| `choose_feedback_style` | Small gain all errors | −frustration, +attention |
+| `generate_micro_drill` | Good gain if demo/cues given first | −attention (tiring) |
+| `quick_assessment` | **Reveals hidden comprehension** | +frustration (mild stress) |
+| `revision_loop` | Targets weakest error (1.25x if assessed first) | −attention (repetitive) |
+| `finalize_plan` | Triggers final grading | — |
 
 ## Tasks
 
-| Task ID | Difficulty | Target Sign | Max Steps |
-|---|---|---|---|
-| `easy_remediate_handshape` | Easy | HELLO | 6 |
-| `medium_fix_movement_with_scaffold` | Medium | THANK-YOU | 8 |
-| `hard_adaptive_multi_error_plan` | Hard | HELP | 10 |
+| Task | Difficulty | Errors | Max Steps | Challenge |
+|---|---|---|---|---|
+| `easy_remediate_handshape` | Easy | 1 error | 6 | Tight budget, simple learner |
+| `medium_movement_timing_scaffold` | Medium | 2 errors | 8 | Must assess and target both errors |
+| `hard_multi_error_adaptive` | Hard | 3 errors | 10 | Low attention, high frustration, must adapt |
 
-## Reward & Grading
+## Grading (Outcome-Based)
 
-**Step reward** (0.0–1.0) computed per action with weighted components:
-- Intervention relevance (0.25) — does the action target active errors?
-- Pedagogical sequence (0.25) — is the action in a sensible order?
-- Learner need alignment (0.20) — does it match support needs?
-- Task completeness (0.20) — fraction of requirements covered
-- Efficiency (0.10) — penalizes redundant actions
+The final grade measures **actual learner improvement**, not just plan structure:
 
-**Final grade** (0.0–1.0) uses the same components computed over the full episode. Pass threshold: **0.70**.
+| Component | Weight | What It Measures |
+|---|---|---|
+| Comprehension gain | 0.35–0.40 | Did the learner actually improve? (weighted by severity) |
+| Pedagogical quality | 0.20–0.25 | Good sequencing + requirement coverage + pattern bonuses |
+| Learner wellbeing | 0.15–0.25 | Attention, frustration, confidence at episode end |
+| Efficiency | 0.20 | Fewer steps + no redundant actions |
+
+Pass threshold: **0.70**. The grade includes before/after comprehension scores showing exactly what changed.
 
 ## API Endpoints (OpenEnv-Compliant)
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/health` | Returns `{"status": "healthy"}` |
-| GET | `/metadata` | Environment name, description, version |
-| GET | `/schema` | JSON schemas for action, observation, state |
-| POST | `/reset` | Reset environment, returns initial observation |
-| POST | `/step` | Submit action `{"action": {...}}`, returns observation |
-| GET | `/state` | Current episode state (episode_id, step_count, etc.) |
-| GET | `/tasks` | List available tasks (extra endpoint) |
+| GET | `/health` | `{"status": "healthy"}` |
+| GET | `/metadata` | Environment name + description |
+| GET | `/schema` | Action/observation/state JSON schemas |
+| POST | `/reset` | Start episode: `{"task_id": "...", "seed": 42}` |
+| POST | `/step` | Submit action: `{"action": {...}}` |
+| GET | `/state` | Episode state (episode_id, step_count, etc.) |
+| GET | `/tasks` | List available tasks |
 
-### Reset Request/Response
-
-```json
-// POST /reset
-{"task_id": "easy_remediate_handshape"}
-
-// Response
-{"observation": {...}, "reward": null, "done": false}
-```
-
-### Step Request/Response
-
-```json
-// POST /step
-{"action": {"action_type": "slow_motion_demo", "rationale": "...", "payload": {}}}
-
-// Response
-{"observation": {...}, "reward": 0.45, "done": false}
-```
-
-## Local Setup
+## Setup & Run
 
 ```bash
-cd signadapt
 pip install -r requirements.txt
-```
-
-## Run the API Server
-
-```bash
 uvicorn app.main:app --host 0.0.0.0 --port 7860
-```
+pytest tests/ -v  # 31 tests
 
-## Run Tests
-
-```bash
-pytest tests/ -v
-```
-
-## Run Inference
-
-```bash
-# Start the server first, then in another terminal:
-export API_BASE_URL=https://api.openai.com/v1
-export MODEL_NAME=gpt-4o-mini
-export OPENAI_API_KEY=sk-...
+# Inference (server must be running):
+export API_BASE_URL=... MODEL_NAME=... OPENAI_API_KEY=...
 python inference.py
 ```
 
-## Docker
+## Docker / HF Spaces
 
 ```bash
 docker build -t signadapt .
 docker run -p 7860:7860 signadapt
 ```
 
-## Hugging Face Spaces
-
-Deploy as a Docker Space. The app binds to `0.0.0.0:7860` by default, which is the expected port for HF Spaces.
-
-## Environment Variables
-
-| Variable | Description |
-|---|---|
-| `API_BASE_URL` | LLM API endpoint (for inference.py) |
-| `MODEL_NAME` | Model identifier for inference |
-| `HF_TOKEN` | Hugging Face API key |
-| `OPENAI_API_KEY` | OpenAI API key (for inference.py) |
-| `APP_PORT` | Server port (default: 7860) |
+Binds to `0.0.0.0:7860` — ready for Hugging Face Spaces Docker deployment.

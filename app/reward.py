@@ -1,134 +1,92 @@
+"""Outcome-based step reward.
+
+Rewards are computed from actual learner state changes, not just checklist coverage.
+"""
+
 from __future__ import annotations
 
 from app.models import (
     ActionType,
     CoverageFlags,
     ErrorType,
-    RewardBreakdown,
+    LearnerSimState,
     TaskSpec,
 )
 
-# Maps action types to the requirement keywords they satisfy
-_ACTION_TO_REQUIREMENT: dict[ActionType, list[str]] = {
-    ActionType.SELECT_PREREQUISITE_SIGN: ["prerequisite_sign"],
-    ActionType.SLOW_MOTION_DEMO: ["scaffolded_demo", "corrective_intervention"],
-    ActionType.ADD_LOCATION_CUE: ["visual_cue", "corrective_intervention"],
-    ActionType.ADD_MOVEMENT_HINT: ["movement_correction", "corrective_intervention"],
-    ActionType.CHOOSE_FEEDBACK_STYLE: ["feedback_selection"],
-    ActionType.GENERATE_MICRO_DRILL: ["micro_drill"],
-    ActionType.QUICK_ASSESSMENT: ["assessment"],
-    ActionType.REVISION_LOOP: ["revision"],
-    ActionType.FINALIZE_PLAN: [],
-}
-
-# Maps action types to the error types they help address
-_ACTION_RELEVANCE: dict[ActionType, list[ErrorType]] = {
-    ActionType.SLOW_MOTION_DEMO: [ErrorType.MOVEMENT, ErrorType.TIMING],
-    ActionType.ADD_LOCATION_CUE: [ErrorType.LOCATION],
-    ActionType.ADD_MOVEMENT_HINT: [ErrorType.MOVEMENT, ErrorType.ORIENTATION],
-    ActionType.GENERATE_MICRO_DRILL: [
-        ErrorType.HANDSHAPE, ErrorType.MOVEMENT, ErrorType.LOCATION,
-        ErrorType.TIMING, ErrorType.ORIENTATION,
-    ],
-    ActionType.CHOOSE_FEEDBACK_STYLE: [
-        ErrorType.HANDSHAPE, ErrorType.MOVEMENT, ErrorType.LOCATION,
-        ErrorType.TIMING, ErrorType.ORIENTATION,
-    ],
-}
-
-
-def newly_satisfied_requirements(
-    action: ActionType,
-    already_satisfied: set[str],
-    required: list[str],
-) -> list[str]:
-    """Return requirement keywords newly covered by this action."""
-    covers = _ACTION_TO_REQUIREMENT.get(action, [])
-    return [r for r in covers if r in required and r not in already_satisfied]
+_NO_COMP_ACTIONS = {ActionType.QUICK_ASSESSMENT, ActionType.FINALIZE_PLAN}
 
 
 def compute_step_reward(
     action: ActionType,
     task: TaskSpec,
-    coverage_before: CoverageFlags,
-    coverage_after: CoverageFlags,
+    learner: LearnerSimState,
+    comp_before: dict[str, float],
+    comp_after: dict[str, float],
+    coverage: CoverageFlags,
     action_history: list[ActionType],
-    satisfied_before: set[str],
-    satisfied_after: set[str],
     step: int,
-) -> RewardBreakdown:
-    """Compute intermediate reward for a single step."""
+) -> float:
+    """Compute a single step reward in [0.0, 1.0]."""
+
     weights = task.grader_weights or {
-        "intervention_relevance": 0.25,
-        "pedagogical_sequence": 0.25,
-        "learner_need_alignment": 0.20,
-        "task_completeness": 0.20,
-        "efficiency": 0.10,
+        "comprehension_gain": 0.40,
+        "pedagogical_quality": 0.25,
+        "learner_wellbeing": 0.15,
+        "efficiency": 0.20,
     }
 
-    # 1. Intervention relevance – does the action address an active error?
-    error_types = {ep.error_type for ep in task.error_patterns}
-    relevant_errors = _ACTION_RELEVANCE.get(action, [])
-    if action == ActionType.FINALIZE_PLAN:
-        relevance = 0.5
-    elif action in (ActionType.SELECT_PREREQUISITE_SIGN, ActionType.QUICK_ASSESSMENT, ActionType.REVISION_LOOP):
-        relevance = 0.7
-    elif any(e in error_types for e in relevant_errors):
-        relevance = 1.0
-    else:
-        relevance = 0.2
+    # 1. Comprehension gain (weighted by error severity)
+    error_severity = {ep.error_type.value: ep.severity for ep in task.error_patterns}
+    total_weighted_gain = 0.0
+    total_weight = 0.0
+    for et_val, sev in error_severity.items():
+        before = comp_before.get(et_val, 0.0)
+        after = comp_after.get(et_val, 0.0)
+        total_weighted_gain += (after - before) * sev
+        total_weight += sev
 
-    # 2. Pedagogical sequence – is the action in a sensible order?
+    if action in _NO_COMP_ACTIONS:
+        # Assessment and finalize get moderate comp score (information value)
+        comp_score = 0.4
+    elif total_weight > 0:
+        # Normalize: a gain of 0.15 weighted average is excellent
+        comp_score = min(1.0, total_weighted_gain / total_weight / 0.15)
+        comp_score = max(0.0, comp_score)
+    else:
+        comp_score = 0.0
+
+    # 2. Pedagogical quality — sequence and relevance
     ideal = task.ideal_action_order
-    seq_score = 0.5  # default
+    ped_score = 0.5
     if action in ideal:
         ideal_idx = ideal.index(action)
-        # Reward if it's roughly in the right position
-        expected_fraction = ideal_idx / max(len(ideal) - 1, 1)
-        actual_fraction = step / max(task.constraints.max_steps - 1, 1)
-        diff = abs(expected_fraction - actual_fraction)
-        seq_score = max(0.0, 1.0 - diff * 2)
+        expected_frac = ideal_idx / max(len(ideal) - 1, 1)
+        actual_frac = step / max(task.constraints.max_steps - 1, 1)
+        diff = abs(expected_frac - actual_frac)
+        ped_score = max(0.0, 1.0 - diff * 1.5)
 
-    # 3. Learner need alignment – does the action match support needs?
-    needs = {n.value for n in task.learner.support_needs}
-    need_score = 0.5
-    if action == ActionType.SLOW_MOTION_DEMO and "slowed_pacing" in needs:
-        need_score = 1.0
-    elif action == ActionType.ADD_LOCATION_CUE and "visual_aids" in needs:
-        need_score = 1.0
-    elif action == ActionType.CHOOSE_FEEDBACK_STYLE:
-        need_score = 0.8
-    elif action == ActionType.REVISION_LOOP and "repetition" in needs:
-        need_score = 1.0
-    elif action == ActionType.FINALIZE_PLAN:
-        need_score = 0.5
+    # Bonus for good sequencing patterns
+    if action == ActionType.GENERATE_MICRO_DRILL and coverage.demo_before_drill:
+        ped_score = min(1.0, ped_score + 0.15)
+    if action == ActionType.REVISION_LOOP and coverage.assessed_before_revision:
+        ped_score = min(1.0, ped_score + 0.15)
 
-    # 4. Task completeness – fraction of requirements satisfied
-    total_req = len(task.constraints.required_outputs)
-    completeness = len(satisfied_after) / max(total_req, 1)
+    # 3. Learner wellbeing — attention and frustration
+    wellbeing = (learner.attention * 0.5 + (1.0 - learner.frustration) * 0.3 + learner.confidence * 0.2)
+    wellbeing = min(1.0, max(0.0, wellbeing))
 
-    # 5. Efficiency – penalise duplicate actions
+    # 4. Efficiency — penalize duplicates
     dup_count = action_history.count(action)
     if dup_count > 1:
-        efficiency = max(0.0, 1.0 - (dup_count - 1) * 0.3)
+        efficiency = max(0.0, 1.0 - (dup_count - 1) * 0.35)
     else:
         efficiency = 1.0
 
     # Weighted sum
     total = (
-        weights.get("intervention_relevance", 0.25) * relevance
-        + weights.get("pedagogical_sequence", 0.25) * seq_score
-        + weights.get("learner_need_alignment", 0.20) * need_score
-        + weights.get("task_completeness", 0.20) * completeness
-        + weights.get("efficiency", 0.10) * efficiency
+        weights.get("comprehension_gain", 0.40) * comp_score
+        + weights.get("pedagogical_quality", 0.25) * ped_score
+        + weights.get("learner_wellbeing", 0.15) * wellbeing
+        + weights.get("efficiency", 0.20) * efficiency
     )
-    total = round(min(1.0, max(0.0, total)), 4)
-
-    return RewardBreakdown(
-        intervention_relevance=round(relevance, 4),
-        pedagogical_sequence=round(seq_score, 4),
-        learner_need_alignment=round(need_score, 4),
-        task_completeness=round(completeness, 4),
-        efficiency=round(efficiency, 4),
-        total=total,
-    )
+    return round(min(1.0, max(0.0, total)), 4)
