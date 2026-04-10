@@ -34,8 +34,8 @@ from openai import OpenAI
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
-# The judges provide HF_TOKEN as the API key for their LiteLLM proxy
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or "no-key"
+# Judges inject API_KEY for their LiteLLM proxy; also support HF_TOKEN and OPENAI_API_KEY
+API_KEY = os.getenv("API_KEY") or os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or "no-key"
 
 ENV_URL = os.getenv("ENV_URL", "http://localhost:7860")
 BENCHMARK = "signadapt"
