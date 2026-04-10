@@ -32,13 +32,19 @@ from openai import OpenAI
 
 # ── Configuration ──────────────────────────────────────────────────────
 
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://api.openai.com/v1"
-MODEL_NAME = os.getenv("MODEL_NAME") or "gpt-4o-mini"
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
+# The judges provide HF_TOKEN as the API key for their LiteLLM proxy
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or "no-key"
 
-ENV_URL = os.getenv("ENV_URL") or "http://localhost:7860"
+ENV_URL = os.getenv("ENV_URL", "http://localhost:7860")
 BENCHMARK = "signadapt"
 MAX_SAFETY_STEPS = 15
+
+print(f"  [INFO] Using API_BASE_URL={API_BASE_URL}", file=sys.stderr)
+print(f"  [INFO] Using MODEL_NAME={MODEL_NAME}", file=sys.stderr)
+print(f"  [INFO] API_KEY={'set (' + API_KEY[:8] + '...)' if API_KEY != 'no-key' else 'NOT SET'}", file=sys.stderr)
+print(f"  [INFO] ENV_URL={ENV_URL}", file=sys.stderr)
 
 VALID_ACTIONS = [
     "select_prerequisite_sign", "slow_motion_demo", "add_location_cue",
@@ -293,38 +299,34 @@ def llm_select_action(
             {"role": "system", "content": _get_system_prompt(difficulty)},
         ]
 
-        # Add conversation history (last 6 turns max to stay within context)
-        for turn in conversation_history[-6:]:
+        # Add conversation history (last 4 turns max to stay within context)
+        for turn in conversation_history[-4:]:
             messages.append(turn)
 
         messages.append({"role": "user", "content": f"Current observation:\n{obs_summary}"})
 
-        max_retries = 2
-        for attempt in range(max_retries + 1):
-            try:
-                resp = client.chat.completions.create(
-                    model=MODEL_NAME,
-                    messages=messages,
-                    temperature=0.1,
-                    max_tokens=256,
-                )
-                text = resp.choices[0].message.content.strip()
-                if text.startswith("```"):
-                    text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-                parsed = json.loads(text)
-                if parsed.get("action_type") in VALID_ACTIONS:
-                    return {
-                        "action_type": parsed["action_type"],
-                        "rationale": str(parsed.get("rationale", ""))[:200],
-                        "payload": parsed.get("payload", {}),
-                    }
-            except Exception as e:
-                if attempt < max_retries:
-                    wait = 1.0 * (attempt + 1)
-                    print(f"  [WARN] LLM attempt {attempt+1} failed: {e}. Retrying in {wait}s...", file=sys.stderr)
-                    time.sleep(wait)
-                else:
-                    print(f"  [WARN] LLM call failed after {max_retries+1} attempts: {e}", file=sys.stderr)
+        # Single attempt — no retries to avoid timeout on judges' infra
+        try:
+            resp = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=256,
+            )
+            text = resp.choices[0].message.content.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            parsed = json.loads(text)
+            if parsed.get("action_type") in VALID_ACTIONS:
+                return {
+                    "action_type": parsed["action_type"],
+                    "rationale": str(parsed.get("rationale", ""))[:200],
+                    "payload": parsed.get("payload", {}),
+                }
+            else:
+                print(f"  [WARN] LLM returned invalid action: {parsed.get('action_type')}", file=sys.stderr)
+        except Exception as e:
+            print(f"  [WARN] LLM call failed: {e}", file=sys.stderr)
     except Exception as e:
         print(f"  [WARN] LLM selection failed: {e}", file=sys.stderr)
     return None
