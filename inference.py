@@ -272,55 +272,61 @@ def llm_select_action(
     conversation_history: list[dict],
     retry_count: int = 0,
 ) -> dict | None:
-    """Select action using LLM with full conversation context."""
-    obs_summary = json.dumps({
-        "task_id": obs.get("task_id"),
-        "difficulty": obs.get("difficulty"),
-        "error_patterns": obs.get("error_patterns"),
-        "support_needs": obs.get("support_needs"),
-        "coverage": obs.get("coverage"),
-        "completed_requirements": obs.get("completed_requirements"),
-        "remaining_steps": obs.get("remaining_steps"),
-        "current_plan": obs.get("current_plan"),
-        "learner_signals": obs.get("learner_signals"),
-    }, indent=2)
+    """Select action using LLM with full conversation context.
 
-    messages = [
-        {"role": "system", "content": _get_system_prompt(difficulty)},
-    ]
+    Returns None on ANY failure so the caller can fall back to heuristic.
+    """
+    try:
+        obs_summary = json.dumps({
+            "task_id": obs.get("task_id"),
+            "difficulty": obs.get("difficulty"),
+            "error_patterns": obs.get("error_patterns"),
+            "support_needs": obs.get("support_needs"),
+            "coverage": obs.get("coverage"),
+            "completed_requirements": obs.get("completed_requirements"),
+            "remaining_steps": obs.get("remaining_steps"),
+            "current_plan": obs.get("current_plan"),
+            "learner_signals": obs.get("learner_signals"),
+        }, default=str, indent=2)
 
-    # Add conversation history (last 6 turns max to stay within context)
-    for turn in conversation_history[-6:]:
-        messages.append(turn)
+        messages = [
+            {"role": "system", "content": _get_system_prompt(difficulty)},
+        ]
 
-    messages.append({"role": "user", "content": f"Current observation:\n{obs_summary}"})
+        # Add conversation history (last 6 turns max to stay within context)
+        for turn in conversation_history[-6:]:
+            messages.append(turn)
 
-    max_retries = 2
-    for attempt in range(max_retries + 1):
-        try:
-            resp = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=messages,
-                temperature=0.1,
-                max_tokens=256,
-            )
-            text = resp.choices[0].message.content.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            parsed = json.loads(text)
-            if parsed.get("action_type") in VALID_ACTIONS:
-                return {
-                    "action_type": parsed["action_type"],
-                    "rationale": str(parsed.get("rationale", ""))[:200],
-                    "payload": parsed.get("payload", {}),
-                }
-        except Exception as e:
-            if attempt < max_retries:
-                wait = 1.0 * (attempt + 1)
-                print(f"  [WARN] LLM attempt {attempt+1} failed: {e}. Retrying in {wait}s...", file=sys.stderr)
-                time.sleep(wait)
-            else:
-                print(f"  [WARN] LLM call failed after {max_retries+1} attempts: {e}", file=sys.stderr)
+        messages.append({"role": "user", "content": f"Current observation:\n{obs_summary}"})
+
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                resp = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=256,
+                )
+                text = resp.choices[0].message.content.strip()
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+                parsed = json.loads(text)
+                if parsed.get("action_type") in VALID_ACTIONS:
+                    return {
+                        "action_type": parsed["action_type"],
+                        "rationale": str(parsed.get("rationale", ""))[:200],
+                        "payload": parsed.get("payload", {}),
+                    }
+            except Exception as e:
+                if attempt < max_retries:
+                    wait = 1.0 * (attempt + 1)
+                    print(f"  [WARN] LLM attempt {attempt+1} failed: {e}. Retrying in {wait}s...", file=sys.stderr)
+                    time.sleep(wait)
+                else:
+                    print(f"  [WARN] LLM call failed after {max_retries+1} attempts: {e}", file=sys.stderr)
+    except Exception as e:
+        print(f"  [WARN] LLM selection failed: {e}", file=sys.stderr)
     return None
 
 
@@ -344,13 +350,17 @@ def run_episode(task_id: str) -> dict:
         reset_resp = http.post("/reset", json={"task_id": task_id}).json()
         obs = reset_resp["observation"]
         done = reset_resp.get("done", False)
-        difficulty = obs.get("difficulty", "medium")
+        difficulty = obs.get("difficulty", "medium") if isinstance(obs, dict) else "medium"
 
         for step in range(1, MAX_SAFETY_STEPS + 1):
             if done:
                 break
 
-            action = llm_select_action(obs, difficulty, conversation_history)
+            # Select action: try LLM first, fall back to heuristic
+            try:
+                action = llm_select_action(obs, difficulty, conversation_history)
+            except Exception:
+                action = None
             if action is None:
                 action = heuristic_action(obs)
             else:
@@ -378,15 +388,18 @@ def run_episode(task_id: str) -> dict:
             steps_taken = step
 
             # Build conversation history for multi-turn context
-            conversation_history.append({
-                "role": "assistant",
-                "content": json.dumps(action),
-            })
-            signals = obs.get("learner_signals", {})
-            conversation_history.append({
-                "role": "user",
-                "content": f"Step {step} result: reward={reward:.2f}, engagement={signals.get('engagement', 'unknown')}, emotional={signals.get('emotional_state', 'unknown')}, remaining={obs.get('remaining_steps', 0)}",
-            })
+            try:
+                conversation_history.append({
+                    "role": "assistant",
+                    "content": json.dumps(action, default=str),
+                })
+                signals = obs.get("learner_signals", {}) if isinstance(obs, dict) else {}
+                conversation_history.append({
+                    "role": "user",
+                    "content": f"Step {step} result: reward={reward:.2f}, engagement={signals.get('engagement', 'unknown')}, emotional={signals.get('emotional_state', 'unknown')}, remaining={obs.get('remaining_steps', 0)}",
+                })
+            except Exception:
+                pass  # Non-critical — conversation history is optional context
 
             log_step(step=step, action=action["action_type"], reward=reward, done=done, error=error_msg)
 
@@ -395,6 +408,9 @@ def run_episode(task_id: str) -> dict:
 
         score = final_grade.get("total_score", 0.0) if final_grade else 0.0
         success = final_grade.get("passed", False) if final_grade else False
+
+    except Exception as e:
+        print(f"  [ERROR] Episode failed: {e}", file=sys.stderr)
 
     finally:
         log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
