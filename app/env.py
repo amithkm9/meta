@@ -21,12 +21,45 @@ from app.models import (
     GradeReport,
     LearnerSignals,
     LearnerSimState,
+    LearningStyle,
     Observation,
     State,
     TaskSpec,
 )
 from app.reward import compute_step_reward
 from app.tasks import default_task_id, get_task
+
+# Optional PyTorch learner model (blended with hand-crafted sim)
+# Disable with SIGNADAPT_NO_NEURAL=1 (e.g., during tests or low-resource deployments)
+import os as _os
+_USE_NEURAL_MODEL = _os.getenv("SIGNADAPT_NO_NEURAL", "").strip() not in ("1", "true")
+try:
+    from app.learner_model import get_learner_model, predict_gains, LearnerBehaviorNet
+except ImportError:
+    _USE_NEURAL_MODEL = False
+
+# ── Learning style modifiers ─────────────────────────────────────────────
+# learning_style → action_type → effectiveness multiplier
+_LEARNING_STYLE_MODS: dict[LearningStyle, dict[ActionType, float]] = {
+    LearningStyle.VISUAL: {
+        ActionType.ADD_LOCATION_CUE: 1.30,
+        ActionType.SLOW_MOTION_DEMO: 1.20,
+        ActionType.ADD_MOVEMENT_HINT: 1.10,
+        ActionType.GENERATE_MICRO_DRILL: 0.90,
+    },
+    LearningStyle.KINESTHETIC: {
+        ActionType.GENERATE_MICRO_DRILL: 1.30,
+        ActionType.REVISION_LOOP: 1.20,
+        ActionType.ADD_MOVEMENT_HINT: 1.15,
+        ActionType.SLOW_MOTION_DEMO: 0.90,
+    },
+    LearningStyle.AUDITORY: {
+        ActionType.CHOOSE_FEEDBACK_STYLE: 1.25,
+        ActionType.SELECT_PREREQUISITE_SIGN: 1.15,
+        ActionType.SLOW_MOTION_DEMO: 0.85,
+    },
+    LearningStyle.MIXED: {},  # No modifiers
+}
 
 # ── Intervention effectiveness matrix ──────────────────────────────────
 # base_effect[action_type][error_type] → base comprehension gain
@@ -96,6 +129,7 @@ class TutoringEnv:
         self._signals: LearnerSignals = LearnerSignals()
         self._steps_since_assessment: int = 999
         self._last_assessed_comprehension: dict[str, float] | None = None
+        self._fatigue: float = 0.0  # accumulated fatigue (0..1)
 
     # ── public interface ───────────────────────────────────────────────
 
@@ -115,6 +149,7 @@ class TutoringEnv:
         self._final_grade = None
         self._steps_since_assessment = 999
         self._last_assessed_comprehension = None
+        self._fatigue = 0.0
 
         # Init simulation
         sim = task.simulation
@@ -140,7 +175,7 @@ class TutoringEnv:
         comp_before = dict(self._learner.comprehension)
 
         # Apply simulation effects
-        self._simulate_action(action)
+        self._simulate_action(action, comp_before)
         self._step_count += 1
         self._steps_since_assessment += 1
         self._action_history.append(action.action_type)
@@ -150,6 +185,21 @@ class TutoringEnv:
 
         # Attention decay
         self._learner.attention = max(0.0, self._learner.attention - task.simulation.attention_decay_per_step)
+
+        # Memory decay — comprehension fades slightly each step if not reinforced
+        decay_rate = task.simulation.memory_decay_rate
+        if decay_rate > 0:
+            for et_val in list(self._learner.comprehension):
+                old_val = self._learner.comprehension[et_val]
+                # Don't decay below initial comprehension
+                floor = self._initial_comprehension.get(et_val, 0.0)
+                decayed = old_val - decay_rate * self._rng.uniform(0.5, 1.5)
+                self._learner.comprehension[et_val] = round(max(floor, decayed), 4)
+
+        # Fatigue accumulation
+        fatigue_rate = task.simulation.fatigue_rate
+        if fatigue_rate > 0:
+            self._fatigue = min(1.0, self._fatigue + fatigue_rate)
 
         # Compute reward
         comp_after = dict(self._learner.comprehension)
@@ -214,12 +264,14 @@ class TutoringEnv:
 
     # ── simulation engine ──────────────────────────────────────────────
 
-    def _simulate_action(self, action: Action) -> None:
+    def _simulate_action(self, action: Action, comp_before: dict[str, float] | None = None) -> None:
         at = action.action_type
         task = self._task
         assert task is not None
         L = self._learner
         error_types = [ep.error_type for ep in task.error_patterns]
+        if comp_before is None:
+            comp_before = dict(L.comprehension)
 
         if at == ActionType.FINALIZE_PLAN:
             self._coverage.plan_finalized = True
@@ -271,6 +323,14 @@ class TutoringEnv:
         elif at == ActionType.CHOOSE_FEEDBACK_STYLE and "attention_support" in needs:
             support_mult = 1.15
 
+        # Learning style modifier
+        style = task.simulation.learning_style
+        style_mods = _LEARNING_STYLE_MODS.get(style, {})
+        style_mult = style_mods.get(at, 1.0)
+
+        # Fatigue reduces effectiveness
+        fatigue_penalty = 1.0 - self._fatigue * 0.35
+
         # Apply effect per error
         effects = _BASE_EFFECT.get(at, {})
         total_gain = 0.0
@@ -278,7 +338,7 @@ class TutoringEnv:
             base = effects.get(et, 0.02)
             noise = self._rng.uniform(0.80, 1.20)
             frustration_penalty = 1.0 - L.frustration * 0.4
-            modifier = L.attention * frustration_penalty * seq_mult * support_mult * noise
+            modifier = L.attention * frustration_penalty * seq_mult * support_mult * style_mult * fatigue_penalty * noise
             gain = base * modifier
             old_comp = L.comprehension.get(et.value, 0.0)
             # Diminishing returns near 1.0
@@ -286,6 +346,46 @@ class TutoringEnv:
             new_comp = min(1.0, old_comp + effective_gain)
             L.comprehension[et.value] = round(new_comp, 4)
             total_gain += new_comp - old_comp
+
+        # Blend with PyTorch neural model predictions (20% neural, 80% hand-crafted)
+        if _USE_NEURAL_MODEL and at not in _NO_EFFECT_ACTIONS:
+            try:
+                model = get_learner_model()
+                style_val = task.simulation.learning_style
+                style_str = style_val.value if hasattr(style_val, 'value') else str(style_val)
+                preds = predict_gains(
+                    model=model,
+                    action_type=at.value,
+                    comprehension=comp_before,
+                    attention=L.attention,
+                    frustration=L.frustration,
+                    confidence=L.confidence,
+                    fatigue=self._fatigue,
+                    step=self._step_count,
+                    max_steps=task.constraints.max_steps,
+                    has_assessed=self._coverage.has_assessment,
+                    has_demo=self._coverage.has_timing_support,
+                    has_drill=self._coverage.has_micro_drill,
+                    has_feedback=self._coverage.has_feedback_style,
+                    has_prerequisite=self._coverage.has_prerequisite,
+                    learning_style=style_str,
+                )
+                # Blend: 80% hand-crafted + 20% neural
+                neural_weight = 0.20
+                for et in error_types:
+                    neural_gain = preds["comprehension_gains"].get(et.value, 0.0)
+                    hc_val = L.comprehension.get(et.value, 0.0)
+                    old_val = comp_before.get(et.value, 0.0)
+                    hc_gain = hc_val - old_val
+                    blended = hc_gain * (1 - neural_weight) + neural_gain * neural_weight
+                    L.comprehension[et.value] = round(min(1.0, old_val + max(0.0, blended)), 4)
+                # Recalculate total_gain after blending
+                total_gain = sum(
+                    L.comprehension.get(et.value, 0.0) - comp_before.get(et.value, 0.0)
+                    for et in error_types
+                )
+            except Exception:
+                pass  # Fall back to pure hand-crafted gains
 
         # Update learner emotional state based on outcome
         if total_gain > 0.08:

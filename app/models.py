@@ -47,6 +47,7 @@ class Difficulty(str, Enum):
     EASY = "easy"
     MEDIUM = "medium"
     HARD = "hard"
+    EXPERT = "expert"
 
 
 # ── Domain models ──────────────────────────────────────────────────────
@@ -92,6 +93,13 @@ class LearnerSimState(BaseModel):
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
+class LearningStyle(str, Enum):
+    VISUAL = "visual"
+    KINESTHETIC = "kinesthetic"
+    AUDITORY = "auditory"
+    MIXED = "mixed"
+
+
 class SimulationParams(BaseModel):
     """Per-task parameters that control the learner simulation."""
     initial_comprehension: dict[str, float] = {}
@@ -100,6 +108,19 @@ class SimulationParams(BaseModel):
     initial_confidence: float = 0.5
     attention_decay_per_step: float = 0.06
     default_seed: int = 42
+    # Advanced simulation features
+    memory_decay_rate: float = Field(
+        default=0.0,
+        description="Per-step comprehension decay (0.0 = no decay, 0.02 = moderate).",
+    )
+    fatigue_rate: float = Field(
+        default=0.0,
+        description="Per-step fatigue accumulation reducing intervention effectiveness.",
+    )
+    learning_style: LearningStyle = Field(
+        default=LearningStyle.MIXED,
+        description="Learner's dominant learning style — affects action effectiveness.",
+    )
 
 
 # ── Learner signals (observable by agent) ──────────────────────────────

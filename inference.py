@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from typing import List, Optional
 
 import httpx
@@ -48,7 +49,10 @@ VALID_ACTIONS = [
 TASK_IDS = [
     "easy_remediate_handshape",
     "medium_movement_timing_scaffold",
+    "medium_orientation_spatial",
     "hard_multi_error_adaptive",
+    "hard_kinesthetic_learner",
+    "expert_sentence_flow_fatigue",
 ]
 
 client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
@@ -74,6 +78,73 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
     print(f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
 
 
+# ── Adaptive system prompts per difficulty ─────────────────────────────
+
+_DIFFICULTY_STRATEGIES = {
+    "easy": """EASY TASK STRATEGY:
+- The learner has only 1 error and high attention. Budget is tight (6 steps).
+- Skip assessment — the learner is engaged and you only need to fix one thing.
+- Go straight to demo + cue/hint, then drill, then finalize.
+- Prioritize efficiency: fewer unique actions that all contribute to the single error.""",
+
+    "medium": """MEDIUM TASK STRATEGY:
+- 2 error types to fix with 8 steps. Learner has moderate attention.
+- ASSESS FIRST to see which error is worse, then target it.
+- Sequence: assess -> demo -> targeted cues/hints -> drill -> feedback -> finalize.
+- Demo before drill gives 1.3x bonus. Assess before revision gives 1.25x.
+- Watch frustration signals — add feedback if emotional_state mentions frustration.""",
+
+    "hard": """HARD TASK STRATEGY:
+- 3 error types, 10 steps, learner has LOW attention and HIGH frustration.
+- ASSESS FIRST, then immediately address frustration with feedback.
+- Build foundation with prerequisite (1.25x boost on ALL future actions).
+- Then: demo -> location cue -> movement hint -> drill -> re-assess -> revision -> finalize.
+- The learner tires quickly — prioritize high-impact actions early.""",
+
+    "expert": """EXPERT TASK STRATEGY:
+- 4 error types, 12 steps, learner has very low attention, high frustration, and FATIGUE.
+- CRITICAL: fatigue reduces ALL intervention effectiveness over time. Act fast.
+- Memory decay means comprehension fades each step — reinforce with drill/revision.
+- ASSESS FIRST to prioritize. ADDRESS FRUSTRATION IMMEDIATELY (feedback early).
+- Then: prerequisite -> demo -> location cue -> movement hint -> drill.
+- Re-assess mid-episode to track decay. Revision loop for weakest area.
+- Balance emotional support with instruction — a burned-out learner learns nothing.""",
+}
+
+SYSTEM_PROMPT_BASE = """You are an expert sign-language tutoring planner. You plan adaptive interventions for a simulated deaf/hard-of-hearing learner.
+
+The learner has hidden comprehension state. You see engagement signals and can reveal comprehension via quick_assessment.
+
+VALID ACTIONS (choose exactly ONE per step):
+- select_prerequisite_sign: Build foundational understanding (1.25x boost on future actions). Payload: {"sign": "name"}.
+- slow_motion_demo: Demonstrate the sign slowly. Strong for movement/timing errors. Boosts attention. Do BEFORE drill for 1.3x bonus.
+- add_location_cue: Visual spatial cue. Strong for location errors. Payload: {"cue": "description"}.
+- add_movement_hint: Movement/orientation guidance. Payload: {"hint": "description"}.
+- choose_feedback_style: Encouragement — reduces frustration, boosts attention. Payload: {"style": "visual"}.
+- generate_micro_drill: Practice drill. Most effective AFTER demo/cues (sequence bonus). Payload: {"focus": "target sign"}.
+- quick_assessment: Reveals actual comprehension scores per error type. Slight frustration increase. Do BEFORE revision for 1.25x bonus.
+- revision_loop: Targets weakest comprehension area. Best after assessment.
+- finalize_plan: End the episode and trigger grading. Use when remaining_steps <= 1 or all interventions done.
+
+CRITICAL RULES:
+1. ALWAYS finalize on the last step (remaining_steps <= 1) — missing this loses the entire episode
+2. NEVER repeat the same action more than once (efficiency penalty + frustration)
+3. Check coverage to see what has already been done — don't repeat covered interventions
+4. Sequence matters: demo -> drill (1.3x), assess -> revision (1.25x), prerequisite -> all (1.25x)
+5. If learner_signals.emotional_state mentions frustration: prioritize choose_feedback_style
+6. If assessed_comprehension is available, target the error type with lowest score
+
+{difficulty_strategy}
+
+Respond with ONLY a JSON object: {"action_type": "...", "rationale": "...", "payload": {...}}
+Keep rationale under 30 words."""
+
+
+def _get_system_prompt(difficulty: str) -> str:
+    strategy = _DIFFICULTY_STRATEGIES.get(difficulty, _DIFFICULTY_STRATEGIES["medium"])
+    return SYSTEM_PROMPT_BASE.format(difficulty_strategy=strategy)
+
+
 # ── Heuristic: assessment-aware adaptive policy ──────────────────────
 
 
@@ -85,21 +156,22 @@ def heuristic_action(obs: dict) -> dict:
     signals = obs.get("learner_signals", {})
     emotional = signals.get("emotional_state", "")
     assessed = signals.get("assessed_comprehension")
+    error_patterns = obs.get("error_patterns", [])
 
     # Always finalize on last step
     if remaining <= 1:
         return _act("finalize_plan", "Last step — finalizing.")
 
-    # STRATEGY 1: Assess first on medium/hard (information before action)
+    # STRATEGY 1: Assess first on medium/hard/expert (information before action)
     if not coverage.get("has_assessment") and remaining > 3 and difficulty != "easy":
         return _act("quick_assessment", "Assess learner state before intervening.")
 
     # STRATEGY 2: If learner is frustrated, prioritize encouragement
-    if "frustration" in emotional and not coverage.get("has_feedback_style"):
+    if "frustration" in emotional.lower() and not coverage.get("has_feedback_style"):
         return _act("choose_feedback_style", "Learner is frustrated — provide encouragement.", {"style": "visual"})
 
-    # STRATEGY 3: Hard tasks need prerequisite foundation
-    if difficulty == "hard" and not coverage.get("has_prerequisite"):
+    # STRATEGY 3: Hard/expert tasks need prerequisite foundation
+    if difficulty in ("hard", "expert") and not coverage.get("has_prerequisite"):
         return _act("select_prerequisite_sign", "Build foundation for complex sign.", {"sign": "foundational-sign"})
 
     # STRATEGY 4: Demo first (always high value, boosts attention)
@@ -116,7 +188,14 @@ def heuristic_action(obs: dict) -> dict:
             if weakest in ("movement", "orientation") and not coverage.get("has_movement_hint"):
                 return _act("add_movement_hint", f"Target weak area: {weakest}.", {"hint": "directional overlay"})
 
-    # STRATEGY 6: Add cues and hints
+    # STRATEGY 6: Add cues and hints based on error patterns
+    error_types = [ep.get("error_type", "") if isinstance(ep, dict) else getattr(ep, "error_type", "") for ep in error_patterns]
+    if any(et in ("location",) for et in error_types) and not coverage.get("has_visual_cue"):
+        return _act("add_location_cue", "Visual cue helps learner ground the sign spatially.", {"cue": "body-midline marker"})
+
+    if any(et in ("movement", "orientation") for et in error_types) and not coverage.get("has_movement_hint"):
+        return _act("add_movement_hint", "Movement hint reinforces correct form.", {"hint": "directional overlay"})
+
     if not coverage.get("has_visual_cue"):
         return _act("add_location_cue", "Visual cue helps learner ground the sign spatially.", {"cue": "body-midline marker"})
 
@@ -132,10 +211,16 @@ def heuristic_action(obs: dict) -> dict:
         return _act("choose_feedback_style", "Select encouraging feedback style.", {"style": "visual"})
 
     # STRATEGY 9: Re-assess to check progress, then revise if needed
-    if not coverage.get("has_revision") and difficulty in ("medium", "hard"):
+    if not coverage.get("has_revision") and difficulty in ("medium", "hard", "expert"):
         if remaining > 2 and coverage.get("has_assessment"):
             return _act("quick_assessment", "Re-assess before revision for targeted approach.")
         return _act("revision_loop", "Reinforce weak areas through repetition.")
+
+    # STRATEGY 10: Expert tasks — second revision if budget allows
+    if difficulty == "expert" and remaining > 2:
+        if not coverage.get("has_feedback_style"):
+            return _act("choose_feedback_style", "Final encouragement before closing.", {"style": "visual"})
+        return _act("revision_loop", "Extra revision to combat memory decay.")
 
     # Done — finalize
     return _act("finalize_plan", "All interventions placed — finalizing plan.")
@@ -163,50 +248,31 @@ def _apply_action_guardrails(obs: dict, action: dict, history: list[str]) -> dic
         return heuristic_action(obs)
 
     # Avoid repeating already-covered setup actions.
-    if action_type == "slow_motion_demo" and coverage.get("has_timing_support"):
-        return heuristic_action(obs)
-    if action_type == "add_location_cue" and coverage.get("has_visual_cue"):
-        return heuristic_action(obs)
-    if action_type == "add_movement_hint" and coverage.get("has_movement_hint"):
-        return heuristic_action(obs)
-    if action_type == "choose_feedback_style" and coverage.get("has_feedback_style"):
-        return heuristic_action(obs)
-    if action_type == "generate_micro_drill" and coverage.get("has_micro_drill"):
+    coverage_map = {
+        "slow_motion_demo": "has_timing_support",
+        "add_location_cue": "has_visual_cue",
+        "add_movement_hint": "has_movement_hint",
+        "choose_feedback_style": "has_feedback_style",
+        "generate_micro_drill": "has_micro_drill",
+        "select_prerequisite_sign": "has_prerequisite",
+    }
+    flag = coverage_map.get(action_type)
+    if flag and coverage.get(flag):
         return heuristic_action(obs)
 
     return None
 
 
-# ── LLM action selection ─────────────────────────────────────────────
-
-SYSTEM_PROMPT = """You are an expert sign-language tutoring planner. You plan adaptive interventions for a simulated deaf/hard-of-hearing learner.
-
-The learner has hidden comprehension state. You see engagement signals and can reveal comprehension via quick_assessment.
-
-VALID ACTIONS (choose exactly ONE per step):
-- select_prerequisite_sign: Build foundational understanding (1.25x boost on future actions). Best for hard tasks.
-- slow_motion_demo: Demonstrate the sign slowly. Strong for movement/timing errors. Boosts attention. Do BEFORE drill for 1.3x bonus.
-- add_location_cue: Visual spatial cue. Strong for location errors. Payload: {"cue": "description"}.
-- add_movement_hint: Movement/orientation guidance. Payload: {"hint": "description"}.
-- choose_feedback_style: Encouragement — reduces frustration, boosts attention. Payload: {"style": "visual"}.
-- generate_micro_drill: Practice drill. Most effective AFTER demo/cues (sequence bonus). Payload: {"focus": "target sign"}.
-- quick_assessment: Reveals actual comprehension scores per error type. Slight frustration increase. Do BEFORE revision for 1.25x bonus.
-- revision_loop: Targets weakest comprehension area. Best after assessment.
-- finalize_plan: End the episode and trigger grading. Use when remaining_steps <= 1 or all interventions done.
-
-STRATEGY GUIDE:
-1. On medium/hard tasks: assess first to see which errors are weakest
-2. If learner_signals.emotional_state mentions frustration: prioritize choose_feedback_style
-3. Sequence matters: demo -> drill (1.3x), assess -> revision (1.25x), prerequisite -> all (1.25x)
-4. Don't repeat the same action — diminishing returns and efficiency penalty
-5. Check remaining_steps — finalize on the last step or you lose the episode
-6. Check coverage to see what has already been done — don't repeat covered interventions
-
-Respond with ONLY a JSON object: {"action_type": "...", "rationale": "...", "payload": {...}}
-Keep rationale under 30 words."""
+# ── LLM action selection with multi-turn context ───────────────────────
 
 
-def llm_select_action(obs: dict) -> dict | None:
+def llm_select_action(
+    obs: dict,
+    difficulty: str,
+    conversation_history: list[dict],
+    retry_count: int = 0,
+) -> dict | None:
+    """Select action using LLM with full conversation context."""
     obs_summary = json.dumps({
         "task_id": obs.get("task_id"),
         "difficulty": obs.get("difficulty"),
@@ -218,28 +284,43 @@ def llm_select_action(obs: dict) -> dict | None:
         "current_plan": obs.get("current_plan"),
         "learner_signals": obs.get("learner_signals"),
     }, indent=2)
-    try:
-        resp = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Observation:\n{obs_summary}"},
-            ],
-            temperature=0.1,
-            max_tokens=256,
-        )
-        text = resp.choices[0].message.content.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-        parsed = json.loads(text)
-        if parsed.get("action_type") in VALID_ACTIONS:
-            return {
-                "action_type": parsed["action_type"],
-                "rationale": str(parsed.get("rationale", ""))[:200],
-                "payload": parsed.get("payload", {}),
-            }
-    except Exception as e:
-        print(f"  [WARN] LLM call failed: {e}", file=sys.stderr)
+
+    messages = [
+        {"role": "system", "content": _get_system_prompt(difficulty)},
+    ]
+
+    # Add conversation history (last 6 turns max to stay within context)
+    for turn in conversation_history[-6:]:
+        messages.append(turn)
+
+    messages.append({"role": "user", "content": f"Current observation:\n{obs_summary}"})
+
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        try:
+            resp = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=256,
+            )
+            text = resp.choices[0].message.content.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            parsed = json.loads(text)
+            if parsed.get("action_type") in VALID_ACTIONS:
+                return {
+                    "action_type": parsed["action_type"],
+                    "rationale": str(parsed.get("rationale", ""))[:200],
+                    "payload": parsed.get("payload", {}),
+                }
+        except Exception as e:
+            if attempt < max_retries:
+                wait = 1.0 * (attempt + 1)
+                print(f"  [WARN] LLM attempt {attempt+1} failed: {e}. Retrying in {wait}s...", file=sys.stderr)
+                time.sleep(wait)
+            else:
+                print(f"  [WARN] LLM call failed after {max_retries+1} attempts: {e}", file=sys.stderr)
     return None
 
 
@@ -250,10 +331,12 @@ def run_episode(task_id: str) -> dict:
 
     rewards: List[float] = []
     action_history: List[str] = []
+    conversation_history: list[dict] = []
     steps_taken = 0
     score = 0.0
     success = False
     final_grade = {}
+    difficulty = "medium"
 
     log_start(task=task_id, env=BENCHMARK, model=MODEL_NAME)
 
@@ -261,12 +344,13 @@ def run_episode(task_id: str) -> dict:
         reset_resp = http.post("/reset", json={"task_id": task_id}).json()
         obs = reset_resp["observation"]
         done = reset_resp.get("done", False)
+        difficulty = obs.get("difficulty", "medium")
 
         for step in range(1, MAX_SAFETY_STEPS + 1):
             if done:
                 break
 
-            action = llm_select_action(obs)
+            action = llm_select_action(obs, difficulty, conversation_history)
             if action is None:
                 action = heuristic_action(obs)
             else:
@@ -292,6 +376,17 @@ def run_episode(task_id: str) -> dict:
             rewards.append(reward)
             action_history.append(action["action_type"])
             steps_taken = step
+
+            # Build conversation history for multi-turn context
+            conversation_history.append({
+                "role": "assistant",
+                "content": json.dumps(action),
+            })
+            signals = obs.get("learner_signals", {})
+            conversation_history.append({
+                "role": "user",
+                "content": f"Step {step} result: reward={reward:.2f}, engagement={signals.get('engagement', 'unknown')}, emotional={signals.get('emotional_state', 'unknown')}, remaining={obs.get('remaining_steps', 0)}",
+            })
 
             log_step(step=step, action=action["action_type"], reward=reward, done=done, error=error_msg)
 

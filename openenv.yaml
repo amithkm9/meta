@@ -1,12 +1,13 @@
 name: signadapt
-version: "1.0.0"
+version: "2.0.0"
 description: >
-  Adaptive sign-language tutoring environment with dynamic learner simulation.
-  An agent plans step-by-step teaching interventions for a simulated
-  deaf/hard-of-hearing learner whose comprehension, attention, frustration,
-  and confidence evolve in response to each intervention. Comprehension is
-  hidden state — the agent must assess to reveal it. Grading is outcome-based:
-  did the learner actually improve?
+  Adaptive sign-language tutoring environment with PyTorch-powered learner
+  simulation. An agent plans step-by-step teaching interventions for a
+  simulated deaf/hard-of-hearing learner whose comprehension, attention,
+  frustration, confidence, and fatigue evolve dynamically. Features memory
+  decay, learning style modeling, and a neural learner behavior predictor.
+  Comprehension is hidden state — the agent must assess to reveal it.
+  Grading is outcome-based: did the learner actually improve?
 author: SignAdapt Team
 
 tasks:
@@ -18,10 +19,22 @@ tasks:
     difficulty: medium
     description: Two-error scaffolded correction requiring assessment and targeted sequencing.
     max_steps: 8
+  - id: medium_orientation_spatial
+    difficulty: medium
+    description: Orientation and spatial errors with visual learning style and memory decay.
+    max_steps: 8
   - id: hard_multi_error_adaptive
     difficulty: hard
     description: Three-error adaptive plan with low attention, high frustration, tight step budget.
     max_steps: 10
+  - id: hard_kinesthetic_learner
+    difficulty: hard
+    description: Kinesthetic learner with three errors, fatigue, and memory decay requiring hands-on approach.
+    max_steps: 10
+  - id: expert_sentence_flow_fatigue
+    difficulty: expert
+    description: Four-error sentence-level signing with severe fatigue, memory decay, and high frustration.
+    max_steps: 12
 
 scoring:
   range: [0.0, 1.0]
@@ -49,7 +62,7 @@ action_space:
 observation_space:
   includes:
     - task_id
-    - difficulty
+    - difficulty (easy, medium, hard, expert)
     - error_patterns
     - learner_signals (engagement, emotional_state, intervention_feedback)
     - assessed_comprehension (only after quick_assessment)
@@ -57,10 +70,15 @@ observation_space:
     - remaining_steps
 
 simulation:
-  learner_state: [comprehension, attention, frustration, confidence]
+  learner_state: [comprehension, attention, frustration, confidence, fatigue]
   hidden_state: comprehension (revealed only via quick_assessment)
   stochastic: true (seeded for reproducibility)
   sequence_bonuses: [demo_before_drill, assess_before_revision, cue_before_drill]
+  advanced_features:
+    - memory_decay: comprehension fades if not reinforced
+    - fatigue: accumulated tiredness reduces intervention effectiveness
+    - learning_styles: visual, kinesthetic, auditory, mixed (affects action effectiveness)
+    - pytorch_neural_model: learned learner behavior predictor blended with simulation
 
 endpoints:
   health: GET /health
@@ -70,3 +88,4 @@ endpoints:
   step: POST /step
   state: GET /state
   tasks: GET /tasks
+  analytics: GET /analytics

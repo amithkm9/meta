@@ -162,5 +162,199 @@
       "revision_loop",
       "finalize_plan"
     ]
+  },
+  {
+    "id": "medium_orientation_spatial",
+    "difficulty": "medium",
+    "learner": {
+      "age_band": "10-14",
+      "proficiency": "intermediate",
+      "primary_language": "ASL",
+      "support_needs": ["visual_aids", "attention_support"]
+    },
+    "lesson_goal": {
+      "target_sign": "SORRY",
+      "description": "Learner produces SORRY with correct A-handshape circular motion over the chest and proper palm orientation facing the body."
+    },
+    "error_patterns": [
+      {
+        "error_type": "orientation",
+        "severity": 0.70,
+        "description": "Learner rotates palm outward instead of facing the body during the circular motion."
+      },
+      {
+        "error_type": "location",
+        "severity": 0.55,
+        "description": "Learner circles over the stomach instead of the chest area."
+      }
+    ],
+    "constraints": {
+      "max_steps": 8,
+      "required_outputs": ["visual_cue", "movement_correction", "assessment", "feedback_selection"],
+      "comprehension_target": 0.65
+    },
+    "simulation": {
+      "initial_comprehension": {"orientation": 0.25, "location": 0.32},
+      "initial_attention": 0.82,
+      "initial_frustration": 0.08,
+      "initial_confidence": 0.52,
+      "attention_decay_per_step": 0.045,
+      "default_seed": 404,
+      "learning_style": "visual",
+      "memory_decay_rate": 0.005,
+      "fatigue_rate": 0.01
+    },
+    "grader_weights": {
+      "comprehension_gain": 0.40,
+      "pedagogical_quality": 0.20,
+      "learner_wellbeing": 0.20,
+      "efficiency": 0.20
+    },
+    "ideal_action_order": [
+      "quick_assessment",
+      "slow_motion_demo",
+      "add_location_cue",
+      "add_movement_hint",
+      "generate_micro_drill",
+      "choose_feedback_style",
+      "quick_assessment",
+      "finalize_plan"
+    ]
+  },
+  {
+    "id": "hard_kinesthetic_learner",
+    "difficulty": "hard",
+    "learner": {
+      "age_band": "8-11",
+      "proficiency": "beginner",
+      "primary_language": "ASL",
+      "support_needs": ["repetition", "tactile_guidance", "attention_support"]
+    },
+    "lesson_goal": {
+      "target_sign": "FRIEND",
+      "description": "Learner produces FRIEND by correctly interlocking index-finger X-handshapes with proper hooking movement and spatial precision."
+    },
+    "error_patterns": [
+      {
+        "error_type": "handshape",
+        "severity": 0.75,
+        "description": "Learner extends full fingers instead of forming the X-handshape hook with the index finger."
+      },
+      {
+        "error_type": "movement",
+        "severity": 0.60,
+        "description": "Learner presses hands together instead of hooking and reversing the interlock."
+      },
+      {
+        "error_type": "orientation",
+        "severity": 0.45,
+        "description": "Palms face downward instead of alternating up-down for the two-hand interlock."
+      }
+    ],
+    "constraints": {
+      "max_steps": 10,
+      "required_outputs": ["prerequisite_sign", "scaffolded_demo", "micro_drill", "assessment", "revision", "feedback_selection"],
+      "comprehension_target": 0.60
+    },
+    "simulation": {
+      "initial_comprehension": {"handshape": 0.20, "movement": 0.22, "orientation": 0.28},
+      "initial_attention": 0.65,
+      "initial_frustration": 0.18,
+      "initial_confidence": 0.38,
+      "attention_decay_per_step": 0.050,
+      "default_seed": 505,
+      "learning_style": "kinesthetic",
+      "memory_decay_rate": 0.008,
+      "fatigue_rate": 0.015
+    },
+    "grader_weights": {
+      "comprehension_gain": 0.35,
+      "pedagogical_quality": 0.20,
+      "learner_wellbeing": 0.25,
+      "efficiency": 0.20
+    },
+    "ideal_action_order": [
+      "quick_assessment",
+      "select_prerequisite_sign",
+      "choose_feedback_style",
+      "slow_motion_demo",
+      "add_movement_hint",
+      "generate_micro_drill",
+      "quick_assessment",
+      "revision_loop",
+      "finalize_plan"
+    ]
+  },
+  {
+    "id": "expert_sentence_flow_fatigue",
+    "difficulty": "expert",
+    "learner": {
+      "age_band": "15-18",
+      "proficiency": "intermediate",
+      "primary_language": "ASL",
+      "support_needs": ["slowed_pacing", "visual_aids", "repetition", "attention_support"]
+    },
+    "lesson_goal": {
+      "target_sign": "I-HELP-YOU",
+      "description": "Learner produces the three-sign sentence I-HELP-YOU with correct directional verb agreement, spatial indexing, and fluid transition between signs."
+    },
+    "error_patterns": [
+      {
+        "error_type": "movement",
+        "severity": 0.80,
+        "description": "Directional verb HELP moves in wrong direction — should go from signer toward addressee."
+      },
+      {
+        "error_type": "location",
+        "severity": 0.65,
+        "description": "Spatial indexing for I and YOU are too close together, making referents ambiguous."
+      },
+      {
+        "error_type": "handshape",
+        "severity": 0.50,
+        "description": "Handshape for HELP (A-on-palm) transitions poorly from I (index point) — fingers not fully formed."
+      },
+      {
+        "error_type": "timing",
+        "severity": 0.55,
+        "description": "Transitions between signs are too abrupt — sentence lacks prosodic flow."
+      }
+    ],
+    "constraints": {
+      "max_steps": 12,
+      "required_outputs": ["prerequisite_sign", "scaffolded_demo", "visual_cue", "movement_correction", "micro_drill", "assessment", "revision", "feedback_selection"],
+      "comprehension_target": 0.55
+    },
+    "simulation": {
+      "initial_comprehension": {"movement": 0.18, "location": 0.20, "handshape": 0.28, "timing": 0.15},
+      "initial_attention": 0.65,
+      "initial_frustration": 0.22,
+      "initial_confidence": 0.32,
+      "attention_decay_per_step": 0.050,
+      "default_seed": 606,
+      "learning_style": "kinesthetic",
+      "memory_decay_rate": 0.01,
+      "fatigue_rate": 0.025
+    },
+    "grader_weights": {
+      "comprehension_gain": 0.35,
+      "pedagogical_quality": 0.20,
+      "learner_wellbeing": 0.25,
+      "efficiency": 0.20
+    },
+    "ideal_action_order": [
+      "quick_assessment",
+      "choose_feedback_style",
+      "select_prerequisite_sign",
+      "slow_motion_demo",
+      "add_location_cue",
+      "add_movement_hint",
+      "generate_micro_drill",
+      "quick_assessment",
+      "revision_loop",
+      "choose_feedback_style",
+      "quick_assessment",
+      "finalize_plan"
+    ]
   }
 ]
